@@ -24,6 +24,10 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Providers' }}
       />
       <Stack.Screen
+        name="vrm-select"
+        options={{ headerShown: true, title: 'Modèle VRM' }}
+      />
+      <Stack.Screen
         name="avatar-preview"
         options={{ headerShown: true, title: "Aperçu de l'avatar" }}
       />

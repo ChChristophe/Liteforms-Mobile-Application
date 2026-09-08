@@ -391,6 +391,24 @@ Le transfert binaire Mobile -> Electron est reporte tant que le catalogue
 Desktop n'est pas insuffisant. Ne pas construire un serveur de fichiers local
 pour le premier flux.
 
+#### Statut D2 — 08/09/2026 : AJUSTEE (decision produit)
+
+La decision par defaut ci-dessus est ajustee par l'utilisateur :
+
+- le Desktop reste proprietaire de la bibliotheque VRM (inchangé) ;
+- le comportement final voulu est un **telechargement Desktop -> Mobile** :
+  l'utilisateur selectionne un VRM dans le catalogue du Desktop et le Mobile
+  le telecharge depuis le poste Electron ;
+- le VRM telecharge **remplace** celui en place sur le telephone — un seul
+  VRM resident a la fois, par contrainte de stockage mobile (pas de
+  bibliotheque locale sur le telephone) ;
+- etat actuel (Phase 3/4) : le modele par defaut `lobsterEdit.vrm` est
+  presente en bundle dans l'application pour le preview. La selection par
+  catalogue et le telechargement depuis le Desktop sont reportes et ne
+  pressent pas ;
+- l'ecran `vrm-select.tsx` decrit cet etat et la cible ; la verification de
+  la reference au moment de l'envoi reste valide.
+
 ### D3 — Connexion initiale
 
 Ordre recommande :

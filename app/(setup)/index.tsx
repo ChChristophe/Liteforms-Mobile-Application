@@ -10,7 +10,7 @@ type MenuEntry = {
   /** Description courte affichee sous le titre. */
   subtitle: string;
   /** Route cible relative au groupe `(setup)`. */
-  href: '/character' | '/environment' | '/providers' | '/avatar-preview';
+  href: '/character' | '/environment' | '/providers' | '/vrm-select' | '/avatar-preview';
 };
 
 /**
@@ -27,6 +27,7 @@ export default function SetupIndexScreen() {
   const router = useRouter();
   const characterName = useConfigStore((state) => state.config.character.name);
   const alcoveColor = useConfigStore((state) => state.config.environment.alcoveColor);
+  const modelFileName = useConfigStore((state) => state.config.avatar.modelRef.fileName);
 
   const entries: MenuEntry[] = [
     {
@@ -45,6 +46,11 @@ export default function SetupIndexScreen() {
       title: 'Providers',
       subtitle: 'LLM, TTS et STT — catalogues statiques, sans appel réseau',
       href: '/providers',
+    },
+    {
+      title: 'Modèle VRM',
+      subtitle: `Référence du modèle — actuellement : ${modelFileName}`,
+      href: '/vrm-select',
     },
     {
       title: "Aperçu de l'avatar",
