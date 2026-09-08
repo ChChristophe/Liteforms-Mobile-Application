@@ -1,41 +1,76 @@
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useConfigStore } from '../../stores/configStore';
+
+/** Entree du menu de configuration. */
+type MenuEntry = {
+  /** Titre principal de l'entree. */
+  title: string;
+  /** Description courte affichee sous le titre. */
+  subtitle: string;
+  /** Route cible relative au groupe `(setup)`. */
+  href: '/character' | '/environment' | '/avatar-preview';
+};
 
 /**
  * Point d'entree du parcours de configuration (groupe `(setup)`).
  *
- * Premier ecran natif, fonctionne sans reseau : presente le flux
- * configuration -> synchronisation Desktop et redirige vers le stub de
- * preview avatar. Aucun appel reseau ni provider n'est effectue (regle
- * produit : le Mobile ne fait aucun appel API externe).
+ * Menu natif hors reseau listant les etapes disponibles. Chaque ecran lit et
+ * ecrit le store de configuration ; aucune API externe n'est appelee (regle
+ * produit). Les etapes providers / VRM / review arrivent en Phase 3 (suite)
+ * et seront ajoutees ici.
  *
- * Navigation : `useRouter().push` plutot que `Link asChild`, dont le Slot
- * Radix ecrase les styles non-objet (cf. expo/expo#31352).
- *
- * Etats : statique, sans chargement ni erreur. Au demontage : sans effet de
- * bord ; aucun store n'existe encore (Phase 2).
+ * Au demontage : sans effet de bord ; le store persiste.
  */
 export default function SetupIndexScreen() {
   const router = useRouter();
+  const characterName = useConfigStore((state) => state.config.character.name);
+  const alcoveColor = useConfigStore((state) => state.config.environment.alcoveColor);
+
+  const entries: MenuEntry[] = [
+    {
+      title: 'Identité',
+      subtitle: `Nom, pronoms, personnalité — actuellement : ${characterName.trim() || 'non défini'}`,
+      href: '/character',
+    },
+    {
+      title: 'Ambiance',
+      subtitle: alcoveColor
+        ? `Mood et couleur d'alcove — actuellement : ${alcoveColor}`
+        : 'Mood et couleur d\'alcove — actuellement : défaut',
+      href: '/environment',
+    },
+    {
+      title: "Aperçu de l'avatar",
+      subtitle: 'Preview du modèle sélectionné (rendu 3D en Phase 4)',
+      href: '/avatar-preview',
+    },
+  ];
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content} bounces={false}>
         <Text style={styles.title}>Liteforms</Text>
         <Text style={styles.subtitle}>Configuration de votre avatar</Text>
-        <Text style={styles.description}>
-          Connectez votre Desktop Liteforms, configurez votre avatar et
-          synchronisez la configuration. Les etapes du wizard arrivent avec
-          les prochaines phases.
-        </Text>
-        <Pressable
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Ouvrir l'aperçu de l'avatar"
-          onPress={() => router.push('/avatar-preview')}
-        >
-          <Text style={styles.buttonText}>Aperçu de l'avatar</Text>
-        </Pressable>
+        <View style={styles.menu}>
+          {entries.map((entry) => (
+            <Pressable
+              key={entry.href}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel={entry.title}
+              onPress={() => router.push(entry.href)}
+            >
+              <View style={styles.rowAccent} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>{entry.title}</Text>
+                <Text style={styles.rowSubtitle}>{entry.subtitle}</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -48,41 +83,59 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
     padding: 24,
   },
   title: {
+    marginTop: 24,
     fontSize: 32,
     fontWeight: '700',
     color: '#111827',
   },
   subtitle: {
     marginTop: 4,
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#4b5563',
-  },
-  description: {
-    marginTop: 16,
-    fontSize: 15,
-    lineHeight: 22,
+    marginBottom: 28,
+    fontSize: 16,
     color: '#6b7280',
   },
-  button: {
-    marginTop: 32,
-    minHeight: 48,
-    borderRadius: 12,
-    backgroundColor: '#4a90d9',
+  menu: {
+    gap: 12,
+  },
+  row: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+    minHeight: 72,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    padding: 16,
+    gap: 14,
   },
-  buttonPressed: {
-    opacity: 0.7,
+  rowPressed: {
+    backgroundColor: '#f3f4f6',
   },
-  buttonText: {
-    fontSize: 16,
+  rowAccent: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    backgroundColor: '#4a90d9',
+  },
+  rowText: {
+    flex: 1,
+  },
+  rowTitle: {
+    fontSize: 17,
     fontWeight: '600',
-    color: '#ffffff',
+    color: '#111827',
+  },
+  rowSubtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6b7280',
+  },
+  chevron: {
+    fontSize: 22,
+    color: '#9ca3af',
   },
 });
