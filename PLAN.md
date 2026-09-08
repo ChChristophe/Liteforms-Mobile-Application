@@ -359,6 +359,25 @@ explicitement entre :
 Tant que D1 n'est pas resolue, l'agent ne doit ni creer un champ de transfert
 de cle fonctionnel, ni inclure de credential dans `DeviceConfig`.
 
+#### Statut D1 — 08/09/2026 : RESOLUE (decision produit)
+
+Politique retenue : **saisie Mobile, transfert unique authentifie**, avec
+statut masque :
+
+1. le Mobile peut proposer la saisie d'une cle provider ;
+2. la cle est envoyee une seule fois a Electron sur un endpoint d'ecriture
+   distinct et authentifie (session pairée, Phase 8) ;
+3. rien ne persiste sur le Mobile : ni AsyncStorage, ni SecureStore ;
+4. Electron ne renvoie jamais la valeur : ses reponses de statut n'exposent
+   qu'une forme masquee de type `sk-****`, affichable en lecture seule ;
+5. `DeviceConfig` ne contient aucun champ de credential ; le statut
+   configured/not configured par provider vient des reponses Desktop.
+
+Conséquence pour Phase 2 : le store et la persistance Mobile ne portent que
+la configuration ordinaire ; aucune des deux couches ne doit recevoir de
+secret. `AGENTS.md` (paragraphe "stocke les credentials") devra etre corrige
+pour refléter cette decision au moment de la Phase 3.
+
 ### D2 — Contrat VRM
 
 Decision par defaut recommandee :
