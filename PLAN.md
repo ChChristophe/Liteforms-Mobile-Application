@@ -674,6 +674,47 @@ La Phase 0 est validee si :
 - le premier test de portage possede un critere observable ;
 - les choix techniques sont documentes avant l'implementation.
 
+#### Statut Phase 0 — 08/09/2026 : VALIDE
+
+Constat verifie :
+
+- depot propre, aucun code POC residuel ; `dist/` est une sortie d'export
+  Expo gitignoree ;
+- scaffold coherent : `expo ~57.0.20`, `react-native 0.86.3`, `react 19.2.3`,
+  Node 24 ;
+- les scripts `test`/`typecheck` du POC ont disparu avec lui ; ils sont
+  reintroduits en Phase 1.
+
+Critere de succes du premier preview natif :
+
+- un ecran de preview charge le VRM bundle avec son animation idle depuis une
+  route Expo Router, sans reseau ;
+- etats loading / error / retry / ready affiches ;
+- dix montages/demontages successifs sans rendu duplique ni boucle residuelle.
+
+Choix d'implementation, sans recopie des hacks POC :
+
+- pipeline prouve conserve : GLView -> renderer expo-gl -> GLTFLoader +
+  VRMLoaderPlugin -> conversion textures -> mixer VRMA ;
+- le shim DOM est scope au contexte GL charge, pas un monkey-patch global de
+  `document.createElementNS` ;
+- disposal explicite des geometries, materiaux, textures et actions ;
+- boucle RAF arretee au unmount et sur erreur fatale ;
+- logs de debug uniquement en `__DEV__` ;
+- rechargement de modele par remount cle, pas par mutation de scene.
+
+Ecart avec la preuve POC : le POC demontrait la faisabilite (VRM, GLB, VRMA,
+textures expo-gl). La nouvelle implementation reprend la meme chaine en
+corigeant les limites documentees ci-dessus (cycle de vie, memoire, shim
+global, tint non restaurable, logs). Toute difference sera notee dans la fiche
+de portage de la Phase 4.
+
+Resolution de la contradiction interne du plan : la gate Phase 1 mentionne
+"le preview existant s'affiche depuis une route native", mais le POC a ete
+supprime. Decision : la Phase 1 livre une route de preview stub statique
+hors reseau ; les etats loading/error/retry/ready et le rendu GL reel sont
+livres en Phase 4 avec le critere de succes ci-dessus.
+
 ---
 
 ### Phase 1 — Shell Expo natif
