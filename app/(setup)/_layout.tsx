@@ -28,6 +28,10 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Modèle VRM' }}
       />
       <Stack.Screen
+        name="review"
+        options={{ headerShown: true, title: 'Récapitulatif' }}
+      />
+      <Stack.Screen
         name="avatar-preview"
         options={{ headerShown: true, title: "Aperçu de l'avatar" }}
       />

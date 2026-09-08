@@ -10,7 +10,13 @@ type MenuEntry = {
   /** Description courte affichee sous le titre. */
   subtitle: string;
   /** Route cible relative au groupe `(setup)`. */
-  href: '/character' | '/environment' | '/providers' | '/vrm-select' | '/avatar-preview';
+  href:
+    | '/character'
+    | '/environment'
+    | '/providers'
+    | '/vrm-select'
+    | '/review'
+    | '/avatar-preview';
 };
 
 /**
@@ -51,6 +57,11 @@ export default function SetupIndexScreen() {
       title: 'Modèle VRM',
       subtitle: `Référence du modèle — actuellement : ${modelFileName}`,
       href: '/vrm-select',
+    },
+    {
+      title: 'Récapitulatif',
+      subtitle: 'Tout ce que vous êtes prêt à envoyer au Desktop',
+      href: '/review',
     },
     {
       title: "Aperçu de l'avatar",
