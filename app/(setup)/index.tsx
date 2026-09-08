@@ -10,7 +10,7 @@ type MenuEntry = {
   /** Description courte affichee sous le titre. */
   subtitle: string;
   /** Route cible relative au groupe `(setup)`. */
-  href: '/character' | '/environment' | '/avatar-preview';
+  href: '/character' | '/environment' | '/providers' | '/avatar-preview';
 };
 
 /**
@@ -40,6 +40,11 @@ export default function SetupIndexScreen() {
         ? `Mood et couleur d'alcove — actuellement : ${alcoveColor}`
         : 'Mood et couleur d\'alcove — actuellement : défaut',
       href: '/environment',
+    },
+    {
+      title: 'Providers',
+      subtitle: 'LLM, TTS et STT — catalogues statiques, sans appel réseau',
+      href: '/providers',
     },
     {
       title: "Aperçu de l'avatar",

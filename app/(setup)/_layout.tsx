@@ -20,6 +20,10 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Ambiance' }}
       />
       <Stack.Screen
+        name="providers"
+        options={{ headerShown: true, title: 'Providers' }}
+      />
+      <Stack.Screen
         name="avatar-preview"
         options={{ headerShown: true, title: "Aperçu de l'avatar" }}
       />
