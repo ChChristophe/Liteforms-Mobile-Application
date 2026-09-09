@@ -1,4 +1,15 @@
-import type { DeviceConfig } from "../../types/config";
+import type { AvatarPoseConfig, DeviceConfig } from "../../types/config";
+
+/**
+ * Pose de presentation par defaut : modele face camera, cadrage de reference,
+ * avatar dans son plan d'origine. Doit passer `validateDeviceConfig`.
+ */
+export const DEFAULT_AVATAR_POSE: AvatarPoseConfig = {
+  avatarYaw: 0,
+  alcoveYaw: 0,
+  zoom: 1,
+  depth: 0,
+};
 
 /**
  * Valeurs par defaut de la configuration.
@@ -28,6 +39,7 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
       fileName: "lobsterEdit.vrm",
       hash: null,
     },
+    pose: DEFAULT_AVATAR_POSE,
   },
   environment: {
     alcoveColor: "#4a90d9",

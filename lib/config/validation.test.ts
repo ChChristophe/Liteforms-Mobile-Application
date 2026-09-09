@@ -103,6 +103,45 @@ describe("validateDeviceConfig", () => {
     if (result.ok) expect(result.config.character.name).toBe("Clawdia");
   });
 
+  it("fills missing avatar.pose with defaults (stored-config migration)", () => {
+    // Config stockee anterieure a la sous-phase 4.4 : pas de `pose`.
+    const legacy = { ...DEFAULT_DEVICE_CONFIG };
+    const { pose: _dropped, ...avatarWithoutPose } = DEFAULT_DEVICE_CONFIG.avatar;
+    legacy.avatar = avatarWithoutPose as typeof DEFAULT_DEVICE_CONFIG.avatar;
+    const result = validateDeviceConfig(legacy);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.avatar.pose).toEqual(DEFAULT_DEVICE_CONFIG.avatar.pose);
+    }
+  });
+
+  it("rejects a pose with an out-of-range zoom", () => {
+    const bad = {
+      ...DEFAULT_DEVICE_CONFIG,
+      avatar: { ...DEFAULT_DEVICE_CONFIG.avatar, pose: { ...DEFAULT_DEVICE_CONFIG.avatar.pose, zoom: 9 } },
+    };
+    expect(validateDeviceConfig(bad).ok).toBe(false);
+  });
+
+  it("rejects a pose with an out-of-range depth", () => {
+    const bad = {
+      ...DEFAULT_DEVICE_CONFIG,
+      avatar: { ...DEFAULT_DEVICE_CONFIG.avatar, pose: { ...DEFAULT_DEVICE_CONFIG.avatar.pose, depth: 5 } },
+    };
+    expect(validateDeviceConfig(bad).ok).toBe(false);
+  });
+
+  it("rejects a pose with a non-finite yaw", () => {
+    const bad = {
+      ...DEFAULT_DEVICE_CONFIG,
+      avatar: {
+        ...DEFAULT_DEVICE_CONFIG.avatar,
+        pose: { ...DEFAULT_DEVICE_CONFIG.avatar.pose, avatarYaw: Number.NaN },
+      },
+    };
+    expect(validateDeviceConfig(bad).ok).toBe(false);
+  });
+
   it("keeps the contract version constant stable", () => {
     expect(DEVICE_CONFIG_VERSION).toBe("1.0");
   });

@@ -157,12 +157,51 @@ export type VrmModelRef = {
   hash: string | null;
 };
 
-/** Configuration de l'avatar : humeur du preview et modele VRM reference. */
+/** Zoom camera minimal : dezoom maximal (distance multipliee par 1/min). */
+export const POSE_ZOOM_MIN = 0.5;
+/** Zoom camera maximal : rapprochement maximal de la camera. */
+export const POSE_ZOOM_MAX = 2.5;
+/** Profondeur minimale de l'avatar : recul maximal dans l'alcove (unites monde). */
+export const POSE_DEPTH_MIN = -0.25;
+/** Profondeur maximale de l'avatar : avancement maximal vers la camera. */
+export const POSE_DEPTH_MAX = 0.25;
+
+/**
+ * Pose de presentation de l'avatar dans l'alcove (decision produit du
+ * 09/09/2026 : parametres du previewSauvegardes puis transmissibles au
+ * Desktop, qui les rejouera dans son rendu Looking Glass).
+ *
+ * Unites :
+ * - yaws en radians, RELATIFS a l'orientation naturelle du modele (apres
+ *   correction VRM 0.x) : 0 = face camera, cumul des gestes de rotation ;
+ * - `zoom` : multiplicateur de la distance de cadrage (1 = cadrage par
+ *   defaut) ; borne par POSE_ZOOM_MIN/MAX ;
+ * - `depth` : decalage de l'avatar le long de l'axe camera, en unites
+ *   monde, borne par POSE_DEPTH_MIN/MAX.
+ */
+export type AvatarPoseConfig = {
+  /** Rotation horizontale cumulee de l'avatar, en radians relatifs. */
+  avatarYaw: number;
+  /** Rotation horizontale cumulee de l'alcove, en radians relatifs. */
+  alcoveYaw: number;
+  /** Multiplicateur de distance camera, sans unite. */
+  zoom: number;
+  /** Decalage de profondeur de l'avatar, en unites monde. */
+  depth: number;
+};
+
+/** Configuration de l'avatar : humeur, modele VRM et pose de presentation. */
 export type AvatarConfig = {
   /** Humeur du preview, ou `null` pour la defaut du Desktop. */
   mood: AvatarMood | null;
   /** Reference du modele VRM a utiliser. */
   modelRef: VrmModelRef;
+  /**
+   * Pose de presentation (rotation, zoom, profondeur). Absente dans les
+   * configs stockees anterieures : la validation la remplace par les
+   * defauts (chemin de migration, configVersion 1.0 inchangee).
+   */
+  pose: AvatarPoseConfig;
 };
 
 /**
