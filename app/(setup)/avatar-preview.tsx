@@ -1,43 +1,36 @@
-import { StyleSheet, Text, View } from 'react-native';
+import {
+  Dimensions,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useConfigStore } from '../../stores/configStore';
+import { AvatarPreview } from '../../components/avatar/AvatarPreview';
 
 /**
- * Stub de preview avatar (Phase 1) lie au store (Phase 3).
+ * Ecran de preview avatar (Phase 4).
  *
- * Route native hors reseau qui tient la place du rendu GL/VRM reel prevu en
- * Phase 4 (GLView -> renderer expo-gl -> GLTFLoader + VRMLoaderPlugin ->
- * mixer VRMA, cf. PLAN.md). En attendant, elle reflete l'etat courant du
- * store (mood, couleur d'alcove, reference modele) pour verifier le lien
- * configuration -> preview. Les etats loading / error / retry / ready et le
- * rendu 3D sont livres avec le critere de succes de la Phase 4.
+ * Monte le composant de rendu natif `AvatarPreview` (GLView + three.js).
+ * Le remontage reel du modele suit naturellement le remontage par cle du
+ * GLView quand `modelRef.id` change. Une carte rappelle la configuration
+ * courante (mood, couleur, modele) le temps du reglage du cadrage.
  *
- * Au demontage : sans effet de bord ; aucun contexte GL n'est possede.
+ * Au demontage : le composant GL arrete sa boucle RAF et libere ses
+ * ressources ; aucun contexte GL possede par cet ecran.
  */
 export default function AvatarPreviewScreen() {
-  const mood = useConfigStore((state) => state.config.avatar.mood);
-  const modelRef = useConfigStore((state) => state.config.avatar.modelRef);
-  const alcoveColor = useConfigStore((state) => state.config.environment.alcoveColor);
+  const viewportHeight = Dimensions.get('window').height;
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.placeholder}>
-        <View style={[styles.alcove, { backgroundColor: alcoveColor ?? '#f3f4f6' }]}>
-          <Text style={styles.alcoveModel}>{modelRef.fileName}</Text>
-        </View>
-        <View style={styles.statusCard}>
-          <Text style={styles.statusTitle}>Configuration actuelle</Text>
-          <Text style={styles.statusText}>
-            Mood : {mood ?? 'défaut (Desktop)'}
-          </Text>
-          <Text style={styles.statusText}>
-            Alcove : {alcoveColor ?? 'défaut (Desktop)'}
-          </Text>
-          <Text style={styles.statusNote}>
-            Stub Phase 1 — le rendu natif VRM (GLView + Three.js) arrive en
-            Phase 4 avec ses états loading, error, retry et ready.
-          </Text>
-        </View>
+      <View style={[styles.preview, { height: viewportHeight * 0.55 }]}>
+        <AvatarPreview />
+      </View>
+      <View style={styles.statusCard}>
+        <Text style={styles.statusText}>
+          Le preview 3D natif charge le modele bundle avec son animation idle.
+          Le tint/mood et le cadrage restent reglables (sous-phases 4.4-4.5).
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -48,44 +41,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
-  placeholder: {
-    flex: 1,
-    padding: 24,
-    gap: 16,
-  },
-  alcove: {
-    flex: 1,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 32,
-  },
-  alcoveModel: {
-    fontSize: 14,
-    color: '#9ca3af',
+  preview: {
+    overflow: 'hidden',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
   statusCard: {
+    flex: 1,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     backgroundColor: '#f9fafb',
     padding: 16,
-    gap: 4,
-  },
-  statusTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 4,
+    margin: 24,
   },
   statusText: {
-    fontSize: 14,
-    color: '#4b5563',
-  },
-  statusNote: {
-    marginTop: 8,
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#6b7280',
   },
 });
