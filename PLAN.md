@@ -461,6 +461,12 @@ Le premier contrat utile doit rester petit :
       "id": "lobsterEdit",
       "fileName": "lobsterEdit.vrm",
       "hash": null
+    },
+    "pose": {
+      "avatarYaw": 0,
+      "alcoveYaw": 0,
+      "zoom": 1,
+      "depth": 0
     }
   },
   "environment": {
@@ -484,6 +490,14 @@ Le premier contrat utile doit rester petit :
   }
 }
 ```
+
+`avatar.pose` (decision produit du 09/09/2026) porte la pose de presentation
+reglee par les gestes du preview : rotations cumulees avatar/alcove (radians
+relatifs a l'orientation naturelle du modele), zoom (multiplicateur de la
+distance de cadrage, borne 0.5-2.5) et profondeur (offset de l'avatar dans
+l'alcove, unite monde, borne -0.25/+0.25). Le Mobile la persiste des la fin
+de chaque geste et l'enverra telle quelle au Desktop, qui la rejouera dans
+son rendu. Une config stockee sans `pose` est migree vers les defauts.
 
 Ce JSON est un exemple de forme, pas une validation de providers. Les noms,
 modeles et capacites doivent venir des catalogues actuels du Web et du
@@ -1021,10 +1035,15 @@ Tester au minimum :
 
 Le blocage critique du rendu est leve. Sur appareil Android (Expo Go), le
 preview affiche le VRM bundle **texture, anime (idle VRMA) et eclaire**.
-Sous-phases 4.1 (cycle de vie) et 4.2 (remount par cle) implementees ;
-4.3 (textures) fonctionnelle ; 4.4 (tint/mood) et 4.5 (gestes) non commencees ;
-validation appareil complete (10 montages, background/foreground, mesures)
-pas encore executee.
+Sous-phases 4.1 (cycle de vie), 4.2 (remount par cle), 4.3 (textures),
+4.4 (tint alcove live + mood par expressions, sans recharger le VRM) et
+4.5 (gestes : rotation ciblee avatar/alcove par ellipse projetee, zoom au
+pinche, profondeur au pan 2 doigts, tous borne cote runtime) implementees.
+Pose (yaws, zoom, profondeur) persistee dans `DeviceConfig.avatar.pose`
+(decision produit du 09/09/2026, cf. 5.1) : commit au store en fin de
+geste seulement, jamais par frame ; migration des configs stockees sans
+`pose` vers les defauts. Reste a faire : validation appareil complete
+(10 montages, background/foreground, mesures), les gates ci-dessous.
 
 ##### Fiche d'audit du rendu — trois bugs racine identifies et corriges
 
