@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useConfigStore } from '../stores/configStore';
 
@@ -8,6 +9,8 @@ import { useConfigStore } from '../stores/configStore';
  * Layout racine de la navigation native.
  *
  * Montage :
+ * - fournit le `GestureHandlerRootView` requis par react-native-gesture-handler
+ *   (geste d'orbite du preview avatar, PLAN.md sous-phase 4.5) ;
  * - fournit le `SafeAreaProvider` utilise par tous les ecrans ;
  * - declenche UNE fois l'hydratation du store de configuration depuis
  *   AsyncStorage, avant que les ecrans n'affichent des valeurs finales ;
@@ -27,11 +30,13 @@ export default function RootLayout() {
   }, [hydrate]);
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(setup)" />
-      </Stack>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(setup)" />
+        </Stack>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

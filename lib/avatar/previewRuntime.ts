@@ -8,6 +8,15 @@ import {
 } from "@pixiv/three-vrm-animation";
 import * as THREE from "three";
 import type { ExpoWebGLRenderingContext } from "expo-gl";
+import { applyAlcoveTint } from "./environmentTint";
+import {
+  POSE_DEPTH_MAX,
+  POSE_DEPTH_MIN,
+  POSE_ZOOM_MAX,
+  POSE_ZOOM_MIN,
+  type AvatarPoseConfig,
+} from "../../types/config";
+import type { AvatarMood } from "../../types/config";
 
 /**
  * Runtime de preview VRM natif (PLAN.md Phase 4).
@@ -34,6 +43,61 @@ export type PreviewHandle = {
    * Sans effet si dispose() a ete appele.
    */
   frame: (deltaSeconds: number) => void;
+  /**
+   * Applique (hex) ou retire (null) le tint de couleur de l'alcove, sans
+   * recharger aucun asset. Snapshot/restauration geres par
+   * `lib/avatar/environmentTint`.
+   */
+  setAlcoveTint: (hex: string | null) => void;
+  /**
+   * Applique un mood via les expressions VRM (reset + poids 1 si l'expression
+   * a des binds morph) sans recharger le VRM. Un VRM sans binds (ex.
+   * lobsterEdit) reste visuellement inchange mais l'API reste correcte.
+   * Mood Mobile = preset d'expression ; n'a aucun lien avec l'animation
+   * audio/lip-sync Desktop.
+   */
+  setMood: (mood: AvatarMood | null) => void;
+  /**
+   * Zone ecran de l'avatar, en fractions du GLView autour du centre
+   * (l'avatar reste centre : la camera vise le centre de sa bbox). Sert au
+   * composant RN pour decider si un drag tourne l'avatar ou l'alcove.
+   * Les fractions sont les RAYONS d'une ellipse (test du composant :
+   * (dx/hw)^2 + (dy/hh)^2 <= 1) — une bbox rectangulaire d'un VRM aux bras
+   * ecartes couvrirait presque toute la largeur ecran et rendrait l'alcove
+   * intouchable ; l'ellipse epouse une silhouette debout.
+   * Dimensions logiques (dp) : comparer `x/vue.largeur` aux fractions.
+   * Null tant que le cadrage n'a pas ete calcule.
+   */
+  getAvatarZone: () => { halfWidthFrac: number; halfHeightFrac: number } | null;
+  /**
+   * Drag horizontal (4.5) : `target` 'avatar' tourne le VRM sur son axe
+   * vertical, 'alcove' tourne l'alcove sur place. La camera ne bouge plus.
+   * Le signe est choisi pour reproduire le sens visuel de l'ancienne orbite
+   * camera (orbite +yaw = rotation objet -yaw).
+   */
+  dragRotate: (target: "avatar" | "alcove", yawDeltaRadians: number) => void;
+  /**
+   * Fixe le zoom (multiplicateur de distance camera). Les valeurs hors
+   * bornes sont contraintes silencieusement sur POSE_ZOOM_MIN/MAX : le
+   * geste ne doit jamais produire d'etat invalide.
+   */
+  setZoom: (zoom: number) => void;
+  /**
+   * Fixe la profondeur de l'avatar (offset Z en unites monde). Contraint sur
+   * POSE_DEPTH_MIN/MAX pour la meme raison.
+   */
+  setDepth: (depth: number) => void;
+  /**
+   * Pose courante, yaws RELATIFS a l'orientation naturelle du modele :
+   * valeur prete a persister dans `DeviceConfig.avatar.pose` et a renvoyer
+   * au Desktop. A appeler en fin de geste seulement (jamais par frame).
+   */
+  getPose: () => AvatarPoseConfig;
+  /**
+   * Applique absolument une pose persistee (rotation, zoom, profondeur) :
+   * idempotent, reutilise au montage et a chaque changement du store.
+   */
+  applyPose: (pose: AvatarPoseConfig) => void;
   /** Libere geometries, materiaux, textures, mixer, VRM et renderer. */
   dispose: () => void;
 };
@@ -140,6 +204,27 @@ export async function startPreviewRuntime(
     bboxCenter.z + fillDistance * 1.45
   );
   camera.lookAt(bboxCenter);
+  // Cadrage de reference : distance et direction figees, le zoom (pose) ne
+  // fait que diviser la distance. La camera ne change plus d'orientation.
+  const cameraCenter = bboxCenter.clone();
+  const cameraDistance = camera.position.distanceTo(cameraCenter);
+  const cameraDirection = camera.position.clone().sub(cameraCenter).normalize();
+  // Orientation naturelle du modele (apres correction VRM 0.x) : les yaws
+  // de pose sont RELATIFS a cette base (portable sur tout VRM).
+  const baseAvatarYaw = vrm.scene.rotation.y;
+  // Zoom et profondeur courants (pose) ; bornes partagees avec la validation.
+  let zoom = 1;
+  let depth = 0;
+  // Geste 4.5 : coins de la bbox de l'avatar, projetes a la demande (la zone
+  // suit le zoom, contrairement a un cache fige au cadrage initial).
+  const bboxCorners: THREE.Vector3[] = [];
+  for (const x of [bbox.min.x, bbox.max.x]) {
+    for (const y of [bbox.min.y, bbox.max.y]) {
+      for (const z of [bbox.min.z, bbox.max.z]) {
+        bboxCorners.push(new THREE.Vector3(x, y, z));
+      }
+    }
+  }
 
   // --- animation VRMA ---------------------------------------------------
   let mixer: THREE.AnimationMixer | null = null;
@@ -179,6 +264,23 @@ export async function startPreviewRuntime(
   alcoveScene.position.set(bboxCenter.x, bbox.min.y, bboxCenter.z);
   scene.add(alcoveScene);
 
+  /** Applique un zoom contraint et repositionne la camera (distance seule). */
+  function applyZoom(nextZoom: number): void {
+    if (disposed) return;
+    zoom = Math.min(POSE_ZOOM_MAX, Math.max(POSE_ZOOM_MIN, nextZoom));
+    camera.position
+      .copy(cameraCenter)
+      .addScaledVector(cameraDirection, cameraDistance / zoom);
+    camera.lookAt(cameraCenter);
+  }
+
+  /** Applique une profondeur contraintee a l'avatar (offset Z monde). */
+  function applyDepth(nextDepth: number): void {
+    if (disposed) return;
+    depth = Math.min(POSE_DEPTH_MAX, Math.max(POSE_DEPTH_MIN, nextDepth));
+    vrm.scene.position.z = depth;
+  }
+
   return {
     frame(deltaSeconds) {
       if (disposed) return;
@@ -187,6 +289,82 @@ export async function startPreviewRuntime(
       renderer.render(scene, camera);
       // Presente la framebuffer expo-gl (swap buffers equivalent, docs GLView).
       gl.endFrameEXP();
+    },
+    setAlcoveTint(hex) {
+      // No-op apres dispose : la scene est vidée, plus rien a teinter.
+      if (disposed) return;
+      applyAlcoveTint(alcoveScene, hex);
+    },
+    setMood(mood) {
+      const expressionManager = vrm.expressionManager;
+      if (disposed || !expressionManager) return;
+      expressionManager.resetValues();
+      if (!mood) return;
+      const expression = expressionManager.getExpression(mood);
+      // Portage Web `hasBoundVrmExpression` : une expression sans bind morph
+      // ne doit pas etre forcee a 1 (aucun effet visible attendu).
+      const binds = expression?.binds;
+      if (Array.isArray(binds) && binds.length > 0) {
+        expressionManager.setValue(mood, 1);
+      }
+    },
+    getAvatarZone() {
+      if (disposed) return null;
+      camera.updateMatrixWorld(true);
+      let minNX = 1;
+      let maxNX = -1;
+      let minNY = 1;
+      let maxNY = -1;
+      const projected = new THREE.Vector3();
+      for (const corner of bboxCorners) {
+        projected.copy(corner).project(camera);
+        minNX = Math.min(minNX, projected.x);
+        maxNX = Math.max(maxNX, projected.x);
+        minNY = Math.min(minNY, projected.y);
+        maxNY = Math.max(maxNY, projected.y);
+      }
+      // Rayons d'ellipse en FRACTIONS d'ecran : l'etendue NDC (plein ecran = 2)
+      // doit etre divisee par 2 pour devenir une fraction (plein ecran = 1),
+      // puis paddee de 15% (bord de silhouette + imprecision du doigt).
+      return {
+        halfWidthFrac: ((maxNX - minNX) / 4) * 1.15,
+        halfHeightFrac: ((maxNY - minNY) / 4) * 1.15,
+      };
+    },
+    dragRotate(target, yawDeltaRadians) {
+      if (disposed) return;
+      // Sens visuel de l'ancienne orbite camera : orbite +yaw equivalait a
+      // une rotation objet -yaw. La camera reste fixe desormais.
+      const delta = -yawDeltaRadians;
+      if (target === "avatar") {
+        // Rotation autour de l'axe vertical de la racine VRM (pieds) ;
+        // pour un VRM debout, equivalent au centre (X/Z du pivot ~ 0).
+        vrm.scene.rotation.y += delta;
+      } else {
+        // L'alcove pivote sur place autour de sa base centree.
+        alcoveScene.rotation.y += delta;
+      }
+    },
+    setZoom(nextZoom) {
+      applyZoom(nextZoom);
+    },
+    setDepth(nextDepth) {
+      applyDepth(nextDepth);
+    },
+    getPose() {
+      return {
+        avatarYaw: vrm.scene.rotation.y - baseAvatarYaw,
+        alcoveYaw: alcoveScene.rotation.y,
+        zoom,
+        depth,
+      };
+    },
+    applyPose(pose) {
+      if (disposed) return;
+      vrm.scene.rotation.y = baseAvatarYaw + pose.avatarYaw;
+      alcoveScene.rotation.y = pose.alcoveYaw;
+      applyZoom(pose.zoom);
+      applyDepth(pose.depth);
     },
     dispose() {
       if (disposed) return;
