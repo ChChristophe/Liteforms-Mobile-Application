@@ -1017,6 +1017,74 @@ Tester au minimum :
 - temps de chargement et memoire mesures sur appareil ;
 - le modele par defaut reste disponible hors reseau.
 
+#### Statut Phase 4 — 09/09/2026 : PARTIELLEMENT VALIDE
+
+Le blocage critique du rendu est leve. Sur appareil Android (Expo Go), le
+preview affiche le VRM bundle **texture, anime (idle VRMA) et eclaire**.
+Sous-phases 4.1 (cycle de vie) et 4.2 (remount par cle) implementees ;
+4.3 (textures) fonctionnelle ; 4.4 (tint/mood) et 4.5 (gestes) non commencees ;
+validation appareil complete (10 montages, background/foreground, mesures)
+pas encore executee.
+
+##### Fiche d'audit du rendu — trois bugs racine identifies et corriges
+
+1. **Contrat de texture expo-gl** (`lib/avatar/nativeTextureSupport.ts`).
+   Le contrat reel du natif (`expo-gl` `EXGLImageUtils.cpp:loadImage`) est :
+   l'objet passe en `pixels` a `texImage2D`/`texSubImage2D` doit porter
+   `localUri` sous forme `file://...`, c'est la seule cle lue (decodage
+   `stb_image`, JPEG/PNG uniquement). L'ancienne recette — `Asset.fromURI` +
+   `isDataTexture` + `{ data: asset }` — produisait un upload vide :
+   `Asset.fromURI` laisse `localUri` null tant que `downloadAsync` n'a pas
+   tourne, et le chemin `isDataTexture` de three passe `image.data` (plus de
+   `localUri` exploitable). Correction : chemin « regular texture » de three,
+   `texture.image = { localUri, width, height }` (les dimensions servent a
+   l'allocation `texStorage2D`). Ecart avec le POC : le POC passait par des
+   data URIs ; la nouvelle voie evite la multiplication memoire documentee
+   en Phase 0 tout en restant hors reseau.
+
+2. **Timing de purge du cache texture.** three.js lit le binaire texture de
+   facon paresseuse, au premier `renderer.render()` (`stbi_load` natif), pas
+   pendant le parse GLTF. L'uninstall de `installNativeTextureSupport`
+   purgeait les fichiers des le retour de `startPreviewRuntime`, donc avant
+   le premier frame : `stbi_load` lisait un fichier supprime => texture
+   noire, tous les logs de chargement au vert. Correction : la purge est
+   deplacee dans `purgeTextureCache()`, appelee au demontage du GLView
+   (`releaseAll`), apres tout rendu. Lecon : la duree de vie des fichiers
+   texture doit couvrir le premier rendu, pas seulement le chargement.
+
+3. **Nom de propriete de l'animation VRMA.** `VRMAnimationLoaderPlugin`
+   (three-vrm 3.5.5) ecrit `gltf.userData.vrmAnimations` (pluriel, tableau) ;
+   le code lisait `vrmAnimation` (singulier) => `undefined`, aucune
+   animation. Correction : `vrmAnimations?.[0]`.
+
+Corrections d'accompagnement :
+
+- `VRMUtils.rotateVRM0(vrm)` ajoute (VRM 0.x regarde +Z, la camera vise -Z ;
+  reference Web `AvatarScene`) ;
+- proxy `VRMLookAtQuaternionProxy` ajoute manuellement dans `vrm.scene` avec
+  son nom exact, supprimant le warning de `createVRMAnimationClip` ;
+- eclairage aligne sur la reference Web (AmbientLight chaud + key
+  DirectionalLight + fill teinte) : MToon lit la premiere DirectionalLight
+  pour l'ombrage toon, un HemisphereLight seul rendait le modele plat ;
+- patch `three+0.185.1` (patch-package) : detection d'alpha defensive quand
+  le contexte expo-gl n'expose pas `getContextAttributes` ;
+- logs de debug du pipeline textures limites aux messages d'erreur `__DEV__`.
+
+##### Limites connues restantes
+
+- 2 lignes natives `EXGL: gl.pixelStorei() doesn't support this parameter
+  yet!` au premier upload de texture (`UNPACK_PREMULTIPLY_ALPHA_WEBGL` et
+  `UNPACK_COLORSPACE_CONVERSION_WEBGL` non supportes par expo-gl) : bénignes,
+  ponctuelles, non supprimees pour eviter un patch hacky ;
+- les fichiers texture du cache survivent jusqu'au demontage du composant
+  (contrainte de l'upload paresseux) ; volume ~1,2 Mo par texture embarquee,
+  acceptable en preview mono-modele ;
+- `stb_image` ne decode que JPEG/PNG : un VRM texte en WebP echouera
+  silencieusement (texture noire) — a surveiller si des VRM utilisateur
+  arrivent en Phase 5 ;
+- gates non verifiees : 10 montages/demontages, background/foreground,
+  changement de modele, mesures memoire/temps, appareil iOS.
+
 ---
 
 ### Phase 5 — Selection et catalogue VRM
