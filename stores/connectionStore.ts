@@ -1,22 +1,23 @@
 import { create } from "zustand";
-import { fetchDesktopHealth } from "../lib/network/deviceClient";
+import {
+  fetchDesktopHealth,
+  fetchProvisioningHealth,
+  sendWifiProvisioning,
+} from "../lib/network/deviceClient";
 import {
   clearConnectionInfo,
-  clearPairingToken,
   loadConnectionInfo,
-  loadPairingToken,
   saveConnectionInfo,
-  savePairingToken,
 } from "../lib/storage/connectionStorage";
-import type { DesktopHealthCheck } from "../types/device";
+import type { WifiProvisioningRequest } from "../types/device";
 
 /**
  * Etat de connexion au Desktop (PLAN.md Phase 6, premier flux D3).
  *
  * Separation des donnees (PLAN.md 3.3) :
  * - host/port : coordonnees ordinaires (reseau local, non secret) => AsyncStorage ;
- * - token de pairing : SECRET => SecureStore via `lib/storage/connectionStorage`,
- *   la valeur n'existe JAMAIS dans ce store ni dans son state (D1) ;
+ * - mot de passe WiFi de provisioning : transitoire, jamais dans ce store ni
+ *   dans AsyncStorage ;
  * - statut de connexion : volatile, alimente par le client reseau.
  */
 export type ConnectionStore = {
@@ -30,30 +31,27 @@ export type ConnectionStore = {
   checking: boolean;
   /** Derniere erreur exploitable (nee de `redactText`), ou `null`. */
   lastError: string | null;
-  /** `true` un token de pairing est present en SecureStore. */
-  paired: boolean;
   /**
-   * Lit la persistance (AsyncStorage + SecureStore) une fois au demarrage.
-   * Idempotent ; conforme D1, aucune valeur de token n'entre dans l'etat.
+   * Lit les coordonnees persistees (AsyncStorage) une fois au demarrage.
+   * Idempotent.
    */
   hydrate: () => Promise<void>;
   /**
-   * Enregistre les coordonnees + token, puis ping la sante.
+    * Enregistre les coordonnees, puis ping la sante.
    *
    * @param host IPv4 validee en amont (revalidee par le client).
    * @param port port validee en amont.
-   * @param token token de pairing affiche par l'utilisateur (secret) —
-   *   stocke en SecureStore et jamais retourne.
    * @returns le resultat du health check, pour affichage direct.
    */
-  registerDesktop: (
-    host: string,
-    port: number,
-    token: string | null
-  ) => Promise<{ ok: boolean; errors: string[] }>;
+  registerDesktop: (host: string, port: number) => Promise<CheckResult>;
+  /**
+   * Envoie les credentials WiFi au hotspot actuellement configure.
+   * Le mot de passe reste dans l'appel et n'entre jamais dans le store.
+   */
+  provisionWifi: (payload: WifiProvisioningRequest) => Promise<CheckResult>;
   /** Relance un health check sur les coordonnees connues. */
   checkHealth: () => Promise<{ ok: boolean; errors: string[] }>;
-  /** Oublie coordonnees + token (depairing volontaire). */
+  /** Oublie les coordonnees du Desktop. */
   forgetDesktop: () => Promise<void>;
 };
 
@@ -66,35 +64,26 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   connectedDesktop: null,
   checking: false,
   lastError: null,
-  paired: false,
-
   hydrate: async () => {
     const info = await loadConnectionInfo();
-    const paired = (await loadPairingToken()) !== null;
-    set({ host: info?.host ?? null, port: info?.port ?? null, paired });
+    set({ host: info?.host ?? null, port: info?.port ?? null });
   },
 
-  registerDesktop: async (host, port, pairingToken) => {
+  registerDesktop: async (host, port) => {
     if (get().checking) return { ok: false, errors: ["Connexion dejà en cours."] };
     set({ checking: true, lastError: null });
 
     try {
       await saveConnectionInfo(host, port);
-      if (pairingToken !== null) {
-        await savePairingToken(pairingToken);
-      }
       const check = await fetchDesktopHealth(host, port);
       if (check.ok) {
-        set({
-          connectedDesktop: check.desktopName,
-          paired: pairingToken !== null ? true : get().paired,
-        });
+        set({ connectedDesktop: check.desktopName });
         return { ok: true, errors: [] };
       }
       set({ connectedDesktop: null, lastError: check.error });
       return { ok: false, errors: [check.error] };
     } catch (error) {
-      // saveConnectionInfo/savePairingToken: echec = donnée non persistee,
+      // saveConnectionInfo: echec = donnee non persistee,
       // on l'expose pour l'UI (pas de demi-etat affiche comme "connecté").
       const message = error instanceof Error ? error.message : "Erreur.";
       set({ connectedDesktop: null, lastError: message });
@@ -109,17 +98,40 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
     if (host === null || port === null) {
       return { ok: false, errors: ["Aucun Desktop configuré."] };
     }
-    return get().registerDesktop(host, port, null);
+    return get().registerDesktop(host, port);
+  },
+
+  provisionWifi: async (payload) => {
+    const { host, port } = get();
+    if (host === null || port === null) {
+      return { ok: false, errors: ["Aucun hotspot Electron configure."] };
+    }
+    set({ checking: true, lastError: null });
+    try {
+      const health = await fetchProvisioningHealth(host, port);
+      if (!health.ok) {
+        set({ lastError: health.error });
+        return { ok: false, errors: [health.error] };
+      }
+      const result = await sendWifiProvisioning(host, port, payload);
+      if (!result.ok) {
+        set({ lastError: result.error });
+        return { ok: false, errors: [result.error] };
+      }
+      set({ connectedDesktop: null });
+      return { ok: true, errors: [] };
+    } finally {
+      set({ checking: false });
+    }
   },
 
   forgetDesktop: async () => {
-    await Promise.all([clearConnectionInfo(), clearPairingToken()]);
+    await clearConnectionInfo();
     set({
       host: null,
       port: null,
       connectedDesktop: null,
       lastError: null,
-      paired: false,
     });
   },
 }));

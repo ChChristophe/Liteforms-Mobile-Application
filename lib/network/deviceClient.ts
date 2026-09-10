@@ -2,6 +2,8 @@ import { DEVICE_CONFIG_VERSION } from "../../types/config";
 import type {
   DesktopHealthCheck,
   DesktopHealthResponse,
+  ProvisioningHealthResponse,
+  WifiProvisioningRequest,
 } from "../../types/device";
 import { DESKTOP_PROTOCOL_VERSION } from "../../types/device";
 import { DeviceNetworkError, redactText } from "./networkErrors";
@@ -15,7 +17,8 @@ import { DeviceNetworkError, redactText } from "./networkErrors";
  *   (`DeviceNetworkError`, pour l'UI) ;
  * - erreurs redactees (`redactText`) — aucune cle provider n'est jamais
  *   envoyee ni recue sur ces routes (D1) ;
- * - GET de sante sans authentification, premier pas du flux pairing D3.
+ * - health du hotspot et health du reseau normal sans authentification v1 ;
+ * - envoi du WiFi uniquement sur la route de provisioning du hotspot.
  *
  * Coordonnees validees ici (entree D3) : IPv4 de reference + port 1-65535.
  * Le DNS/nom d'hote est reporte (processus D3 : IP manuelle d'abord).
@@ -103,6 +106,48 @@ export function parseDesktopHealth(value: unknown):
       name: r.name,
       protocolVersion: r.protocolVersion,
       ...(configVersions !== undefined ? { configVersions } : {}),
+      ...(r.networkMode === "ethernet" ||
+      r.networkMode === "wifi" ||
+      r.networkMode === "provisioning"
+        ? { networkMode: r.networkMode }
+        : {}),
+    },
+  };
+}
+
+/** Valide le corps de `GET /api/provisioning/health`. */
+export function parseProvisioningHealth(value: unknown):
+  | { ok: true; health: ProvisioningHealthResponse }
+  | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse de provisioning non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (
+    r.ok !== true ||
+    r.mode !== "provisioning" ||
+    typeof r.deviceId !== "string" ||
+    typeof r.name !== "string" ||
+    typeof r.protocolVersion !== "string"
+  ) {
+    return { ok: false, error: "Réponse de provisioning invalide." };
+  }
+  const port = typeof r.port === "number" && Number.isInteger(r.port) ? r.port : null;
+  if (port === null) {
+    return {
+      ok: false,
+      error: "Réponse de provisioning sans port effectif.",
+    };
+  }
+  return {
+    ok: true,
+    health: {
+      ok: true,
+      mode: "provisioning",
+      deviceId: r.deviceId,
+      name: r.name,
+      protocolVersion: r.protocolVersion,
+      port,
     },
   };
 }
@@ -158,6 +203,12 @@ export async function fetchDesktopHealth(
     return { ok: false, error: parsed.error };
   }
   const { health } = parsed;
+  if (health.networkMode === "provisioning") {
+    return {
+      ok: false,
+      error: "Electron est encore en mode provisioning WiFi.",
+    };
+  }
   return {
     ok: true,
     desktopName: health.name,
@@ -167,6 +218,94 @@ export async function fetchDesktopHealth(
         ? true
         : health.configVersions.includes(DEVICE_CONFIG_VERSION),
   };
+}
+
+/**
+ * Verifie le Desktop sur son hotspot temporaire.
+ *
+ * @param host IPv4 du hotspot, souvent `192.168.4.1`.
+ * @param port port HTTP du service de provisioning.
+ * @returns la reponse validee, ou une erreur sans mot de passe.
+ */
+export async function fetchProvisioningHealth(
+  host: string,
+  port: number,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<
+  | { ok: true; health: ProvisioningHealthResponse }
+  | { ok: false; error: string }
+> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/provisioning/health`,
+      { signal: controller.signal, headers: { Accept: "application/json" } }
+    );
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status} du provisioning.` };
+    }
+    const parsed = parseProvisioningHealth(await response.json());
+    return parsed.ok ? parsed : { ok: false, error: parsed.error };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Envoie les credentials WiFi au Desktop sur son hotspot temporaire.
+ *
+ * Le payload n'est jamais logge et le mot de passe ne doit pas etre conserve
+ * dans un store Mobile. Le Desktop doit fermer le hotspot apres acceptation.
+ */
+export async function sendWifiProvisioning(
+  host: string,
+  port: number,
+  payload: WifiProvisioningRequest,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/provisioning/wifi`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    const body = (await response.json()) as { ok?: unknown; message?: unknown };
+    if (!response.ok || body.ok !== true) {
+      return {
+          ok: false,
+          error:
+            typeof body.message === "string"
+            ? redactText(body.message)
+            : `HTTP ${response.status} pendant le provisioning WiFi.`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
 }
 
 /**

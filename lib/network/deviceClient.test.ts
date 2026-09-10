@@ -3,6 +3,7 @@ import {
   validateHostPort,
   buildDesktopUrl,
   parseDesktopHealth,
+  parseProvisioningHealth,
 } from "./deviceClient";
 import { DeviceNetworkError, redactText } from "./networkErrors";
 
@@ -52,6 +53,7 @@ describe("parseDesktopHealth", () => {
       name: "Liteforms Desktop",
       protocolVersion: "1.0",
       configVersions: ["1.0"],
+      networkMode: "wifi",
       unknownField: "ignored",
     });
     expect(result.ok).toBe(true);
@@ -59,6 +61,45 @@ describe("parseDesktopHealth", () => {
       expect(result.health.name).toBe("Liteforms Desktop");
       expect(result.health.configVersions).toEqual(["1.0"]);
     }
+  });
+
+  it("parse le health du hotspot de provisioning", () => {
+    const result = parseProvisioningHealth({
+      ok: true,
+      mode: "provisioning",
+      deviceId: "desktop-8f31",
+      name: "Liteforms Desktop",
+      protocolVersion: "1.0",
+      port: 8080,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.health.port).toBe(8080);
+    }
+  });
+
+  it("refuse un provisioning health sans port", () => {
+    expect(
+      parseProvisioningHealth({
+        ok: true,
+        mode: "provisioning",
+        deviceId: "desktop-8f31",
+        name: "Liteforms Desktop",
+        protocolVersion: "1.0",
+      }).ok
+    ).toBe(false);
+  });
+
+  it("refuse un health normal utilise comme provisioning", () => {
+    expect(
+      parseProvisioningHealth({
+        ok: true,
+        mode: "wifi",
+        deviceId: "desktop-8f31",
+        name: "Liteforms Desktop",
+        protocolVersion: "1.0",
+      }).ok
+    ).toBe(false);
   });
 
   it("refuse ok false", () => {

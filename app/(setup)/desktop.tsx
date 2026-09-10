@@ -3,35 +3,38 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { buildDesktopUrl, validateHostPort } from '../../lib/network/deviceClient';
+import type { WifiProvisioningRequest } from '../../types/device';
 
 /**
  * Connexion manuelle au Desktop (Phase 6, premier flux D3) :
  * 1. saisie IPv4 + port (saisie manuelle obligatoire a ce stade ; mDNS et
  *    provisioning Wi-Fi viennent plus tard dans D3) ;
- * 2. saisie optionnelle du token de pairing (secret => SecureStore D1,
- *    jamais affiche ni rejoue a l'ecran) ;
- * 3. bouton "Tester la connexion" : GET /api/health, reception nom/version ;
- * 4. oublie de la session pairée (depairing) si besoin.
+ * 2. verification du hotspot via `GET /api/provisioning/health` ;
+ * 3. saisie des informations du WiFi cible et envoi via
+ *    `POST /api/provisioning/wifi` ;
+ * 4. oubli des coordonnees du Desktop si besoin.
  *
- * La verification de compatibilite de version accusee via /api/health est
- * informative ici ; l'envoi de config complet (phase 6, suite) la reimpose
- * avant POST /api/device-config.
+ * Le mot de passe WiFi est uniquement conserve dans l'etat local du formulaire
+ * pendant la saisie ; il n'entre jamais dans Zustand, AsyncStorage ou les
+ * logs. iOS peut necessiter un passage manuel dans les reglages WiFi avant
+ * le test du hotspot.
  *
  * Au demontage : aucun état persistant modifie sans action utilisateur.
  */
 export default function DesktopScreen() {
   const host = useConnectionStore((state) => state.host);
   const port = useConnectionStore((state) => state.port);
-  const paired = useConnectionStore((state) => state.paired);
   const connectedDesktop = useConnectionStore((state) => state.connectedDesktop);
   const checking = useConnectionStore((state) => state.checking);
   const lastError = useConnectionStore((state) => state.lastError);
   const registerDesktop = useConnectionStore((state) => state.registerDesktop);
+  const provisionWifi = useConnectionStore((state) => state.provisionWifi);
   const checkHealth = useConnectionStore((state) => state.checkHealth);
   const forgetDesktop = useConnectionStore((state) => state.forgetDesktop);
   const [hostInput, setHostInput] = useState('');
   const [portInput, setPortInput] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
 
   // Hydratation : pre-remplissage avec la session connue.
   const hydrate = useConnectionStore((state) => state.hydrate);
@@ -44,9 +47,7 @@ export default function DesktopScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, port]);
 
-  const canSubmit = !checking && hostInput.length > 0 && portInput.length > 0;
-
-  /** Valide la saisie, enregistre + ping, expose le résultat. */
+  /** Valide la saisie, enregistre les coordonnees et ping le Desktop. */
   async function onTest(): Promise<void> {
     const hostTrimmed = hostInput.trim();
     const portParsed = Number.parseInt(portInput.trim(), 10);
@@ -55,12 +56,29 @@ export default function DesktopScreen() {
       useConnectionStore.setState({ lastError: validation.errors.join(' ') });
       return;
     }
-    const tokenTrimmed = tokenInput.trim();
-    await registerDesktop(
-      hostTrimmed,
-      portParsed,
-      tokenTrimmed.length > 0 ? tokenTrimmed : null
-    );
+    await registerDesktop(hostTrimmed, portParsed);
+  }
+
+  /** Envoie les credentials du WiFi cible au hotspot Electron. */
+  async function onProvisionWifi(): Promise<void> {
+    const hostTrimmed = hostInput.trim();
+    const portParsed = Number.parseInt(portInput.trim(), 10);
+    const validation = validateHostPort(hostTrimmed, portParsed);
+    if (!validation.ok) {
+      useConnectionStore.setState({ lastError: validation.errors.join(' ') });
+      return;
+    }
+    if (wifiSsid.trim().length === 0) {
+      useConnectionStore.setState({ lastError: 'Le SSID WiFi est requis.' });
+      return;
+    }
+    const payload: WifiProvisioningRequest = {
+      ssid: wifiSsid.trim(),
+      password: wifiPassword,
+      security: wifiPassword.length > 0 ? 'WPA2-PSK' : 'OPEN',
+    };
+    const result = await provisionWifi(payload);
+    if (result.ok) setWifiPassword('');
   }
 
   return (
@@ -71,7 +89,7 @@ export default function DesktopScreen() {
           style={styles.input}
           value={hostInput}
           onChangeText={setHostInput}
-          placeholder="192.168.1.42"
+          placeholder="192.168.4.1 (hotspot Electron)"
           placeholderTextColor="#9ca3af"
           keyboardType="numbers-and-punctuation"
           autoCapitalize="none"
@@ -84,27 +102,37 @@ export default function DesktopScreen() {
           style={styles.input}
           value={portInput}
           onChangeText={setPortInput}
-          placeholder="5173"
+          placeholder="8080"
           placeholderTextColor="#9ca3af"
           keyboardType="number-pad"
           accessibilityLabel="Port du Desktop"
         />
-        <Text style={styles.label}>Token de pairing (optionnel)</Text>
+        <Text style={styles.label}>WiFi cible a transmettre a Electron</Text>
         <TextInput
           style={styles.input}
-          value={tokenInput}
-          onChangeText={setTokenInput}
-          placeholder="code affiché par l'application Desktop"
+          value={wifiSsid}
+          onChangeText={setWifiSsid}
+          placeholder="SSID du WiFi cible"
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="SSID du WiFi cible"
+        />
+        <TextInput
+          style={styles.input}
+          value={wifiPassword}
+          onChangeText={setWifiPassword}
+          placeholder="Mot de passe WiFi cible (vide si ouvert)"
           placeholderTextColor="#9ca3af"
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry
-          accessibilityLabel="Token de pairing"
+          accessibilityLabel="Mot de passe du WiFi cible"
         />
         <Text style={styles.hint}>
-          Le token est conservé dans le stockage sécurisé du téléphone, il ne
-          quitte le téléphone que vers le Desktop pairé. Il n'est jamais
-          réaffiché.
+          Rejoignez d'abord le hotspot Electron dans les réglages WiFi du
+          systeme. Le mot de passe cible est envoye une fois puis efface du
+          formulaire.
         </Text>
         <Text style={styles.error}>{lastError}</Text>
 
@@ -120,24 +148,29 @@ export default function DesktopScreen() {
           )}
         </Pressable>
 
+        <Pressable
+          style={[styles.secondaryButton, checking && styles.buttonDisabled]}
+          accessibilityRole="button"
+          onPress={() => void onProvisionWifi()}
+          disabled={checking}
+        >
+          <Text style={styles.secondaryButtonText}>Envoyer le WiFi a Electron</Text>
+        </Pressable>
+
         {connectedDesktop !== null && (
           <View style={styles.statusCard}>
             <Text style={styles.statusOk}>Connecté : {connectedDesktop}</Text>
             <Text style={styles.statusText}>
               {buildDesktopUrl(host ?? '', port ?? 0)}
             </Text>
-            <Text style={styles.statusText}>
-              {paired ? 'Session pairée (token enregistré).' : 'Non pairée.'}
-            </Text>
           </View>
         )}
 
-        {(connectedDesktop !== null || paired) && (
+        {connectedDesktop !== null && (
           <Pressable
             style={styles.forgetButton}
             accessibilityRole="button"
             onPress={() => {
-              setTokenInput('');
               void forgetDesktop();
             }}
           >
@@ -191,6 +224,16 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
+  secondaryButton: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#4a90d9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  secondaryButtonText: { color: '#2563eb', fontWeight: '600', fontSize: 15 },
   statusCard: {
     marginTop: 16,
     borderRadius: 14,

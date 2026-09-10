@@ -34,6 +34,47 @@ export type DesktopHealthResponse = {
    * compatible). Si absent, seule `protocolVersion` est verifiee.
    */
   configVersions?: string[];
+  /** Reseau utilise par Electron apres le provisioning. */
+  networkMode?: "ethernet" | "wifi" | "provisioning";
+};
+
+/** Reponse de `GET /api/provisioning/health` sur le hotspot Electron. */
+export type ProvisioningHealthResponse = {
+  /** `true` si l'endpoint appartient au Desktop Liteforms. */
+  ok: true;
+  /** Mode temporaire : le Desktop attend les informations WiFi cible. */
+  mode: "provisioning";
+  /** Identifiant stable du Desktop, utile pour l'affichage Mobile. */
+  deviceId: string;
+  /** Nom lisible de l'appareil. */
+  name: string;
+  /** Version du protocole LAN. */
+  protocolVersion: string;
+  /**
+   * Port effectif du service de provisioning (defaut `8080` ; jamais le
+   * port 80, qui exige des privileges administrateur sous Windows/Linux).
+   */
+  port: number;
+};
+
+/** Payload sensible de `POST /api/provisioning/wifi`. */
+export type WifiProvisioningRequest = {
+  /** SSID du reseau que le Desktop doit rejoindre apres le hotspot. */
+  ssid: string;
+  /** Mot de passe WiFi ; ne doit jamais etre logge ni persiste sur Mobile. */
+  password: string;
+  /** Securite annoncee par le reseau cible. */
+  security: "OPEN" | "WPA2-PSK" | "WPA3-SAE" | "WPA2-WPA3";
+};
+
+/** Reponse de `POST /api/provisioning/wifi`. */
+export type WifiProvisioningResponse = {
+  /** `true` si Electron a accepte les informations avant redemarrage reseau. */
+  ok: true;
+  /** Le Desktop doit fermer le hotspot et rejoindre le reseau cible. */
+  restartRequired: true;
+  /** Message generique, sans SSID ni mot de passe. */
+  message: string;
 };
 
 /**

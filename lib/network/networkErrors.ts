@@ -39,7 +39,8 @@ export class DeviceNetworkError extends Error {
 
 /**
  * Masque les motifs de secret dans une chaine de diagnostic avant log ou
- * persistence : tokens Bearer du header, cles `sk-...` et pairing codes.
+ * persistence : tokens Bearer du header, cles `sk-...` et mots de passe
+ * WiFi eventuellement presents dans les diagnostics.
  *
  * ponytail: couverture par motifs, pas par secrete session — suffisant
  * pour tous les appels sur ces routes (le token passe uniquement en
@@ -49,5 +50,5 @@ export function redactText(text: string): string {
   return text
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
     .replace(/sk-[A-Za-z0-9_-]+/g, "sk-[redacted]")
-    .replace(/(token|pairing)[=:]\s*[A-Za-z0-9._-]{4,}/gi, "$1=[redacted]");
+    .replace(/(token|pairing|password|passphrase)[=:]\s*[^\s,;]+/gi, "$1=[redacted]");
 }

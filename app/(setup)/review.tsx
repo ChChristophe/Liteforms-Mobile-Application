@@ -19,7 +19,7 @@ import { useConfigStore } from '../../stores/configStore';
  *   affiche le statut global plus les erreurs champ par champ ; c'est la
  *   meme barriere qui bloquera l'envoi en Phase 6 ;
  * - bouton d'envoi en PLACEHOLDER : la connexion Desktop arrive en Phase 6
- *   (route `/api/device-config`, pairing, cf. PLAN.md). Desactive tant que
+ *   (route `/api/device-config`, provisioning WiFi, cf. PLAN.md). Desactive tant que
  *   la configuration est invalide.
  * - "Reinitialiser" restaure les defauts du store.
  *
@@ -144,7 +144,7 @@ export default function ReviewScreen() {
           accessibilityLabel="Envoyer la configuration au Desktop"
           onPress={() => {
             // Phase 6 : envoi reel via lib/network/deviceClient
-            // (pairing + endpoint /api/device-config). Placeholder volontaire.
+            // (provisioning WiFi + endpoint /api/device-config). Placeholder volontaire.
           }}
         >
           <Text style={styles.sendText}>Envoyer au Desktop</Text>

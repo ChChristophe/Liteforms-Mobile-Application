@@ -1,12 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as SecureStore from "expo-secure-store";
 
 /**
  * Persistance des coordonnees Desktop (PLAN.md Phase 6, separe des secrets).
  *
  * - host/port : donnees ordinaires (reseau local non secret) => AsyncStorage ;
- * - token de pairing : SECRET => SecureStore uniquement, jamais AsyncStorage,
- *   jamais log (D1 / regles de stockage PLAN.md 5.2-8).
+ * - aucun token de pairing : le produit utilise le hotspot de provisioning,
+ *   pas une saisie de token sur l'Electron.
  *
  * En cas de corruption (port non numerique, lecture failed), la donnee est
  * consideree absente : le store applicatif retombe sur "non connecte" sans
@@ -16,7 +15,6 @@ import * as SecureStore from "expo-secure-store";
 const STORAGE_PREFIX = "liteforms.connection.";
 const HOST_KEY = `${STORAGE_PREFIX}host`;
 const PORT_KEY = `${STORAGE_PREFIX}port`;
-const PAIRING_TOKEN_KEY = `${STORAGE_PREFIX}pairingToken`;
 
 /** Coordonnees du Desktop, ou `null` si aucune session configuree. */
 export type StoredConnection = { host: string; port: number } | null;
@@ -59,33 +57,4 @@ export async function saveConnectionInfo(
 export async function clearConnectionInfo(): Promise<void> {
   await AsyncStorage.removeItem(HOST_KEY);
   await AsyncStorage.removeItem(PORT_KEY);
-}
-
-/**
- * Lit le token de pairing en SecureStore.
- *
- * @returns la valeur brute, ou `null` si absente/illisible. La valeur ne
- *   doit JAMAIS etre loggee ni affichee (D1) : consommateur = client reseau.
- */
-export async function loadPairingToken(): Promise<string | null> {
-  try {
-    return await SecureStore.getItemAsync(PAIRING_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Ecrit le token de pairing en SecureStore (ecrasement du precedent).
- *
- * @throws si SecureStore echoue (device sans keystore, quota) — l'appelant
- *   affiche l'erreur, on ne persiste pas un demi-pairing.
- */
-export async function savePairingToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(PAIRING_TOKEN_KEY, token);
-}
-
-/** Efface le token de pairing. Idempotent. */
-export async function clearPairingToken(): Promise<void> {
-  await SecureStore.deleteItemAsync(PAIRING_TOKEN_KEY);
 }
