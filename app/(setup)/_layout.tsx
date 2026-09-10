@@ -52,6 +52,10 @@ export default function SetupLayout() {
             ) : null,
         }}
       />
+      <Stack.Screen
+        name="desktop"
+        options={{ headerShown: true, title: 'Desktop' }}
+      />
       <Stack.Screen name="avatar-validation" options={{ headerShown: true, title: 'Validation Phase 4' }} />
     </Stack>
   );

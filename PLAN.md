@@ -1189,6 +1189,17 @@ Cette fonctionnalite est secondaire. Si elle est demandee :
 - la selection survit au relancement ;
 - le Desktop et le Mobile utilisent le meme identifiant de modele.
 
+#### Statut Phase 5 — 10/09/2026 : PARTIEL (depend du Desktop)
+
+- modele par defaut `lobsterEdit.vrm` presente en bundle et visible dans le
+  preview (fait en Phase 4) ; reference editable dans `vrm-select.tsx` ;
+- affichage du catalogue Desktop, verification de la reference et
+  telechargement Desktop -> Mobile : bloques sur le client reseau (Phase 6)
+  et sur le contrat Electron (D4). La phase se terminera avec Phase 6-8 ;
+- gate « un modele invalide ne fait pas planter GLTFLoader » couverte par le
+  workflow assets de Phase 4 (buffer invalide => erreur affichee, pas de
+  crash) — verifiee unitairement, non sur VRM utilisateur (aucun picker).
+
 ---
 
 ### Phase 6 — Client de connexion Electron
@@ -1257,6 +1268,28 @@ app/(main)/connection.tsx
 - une configuration valide est accusee et appliquee ;
 - un Desktop indisponible ne bloque pas l'UI ;
 - aucune cle provider n'est retournee par Electron.
+
+#### Statut Phase 6 — 10/09/2026 : DEBUT (slice 1)
+
+Premier slice livre (20 tests verts) :
+
+- `types/device.ts` : contrat health/capacites Desktop (forme minimale issue
+  de ce plan, v. 5.2) — flag D4 : doit etre confirme avec
+  `liteforms-electron` avant la suite ;
+- `lib/network/deviceClient.ts` : URL/validations IPv4+port (D3 : IP
+  manuelle), `GET /api/health` avec AbortController timeout 4 s,
+  distinction timeout/injoignable/HTTP/payload, redaction avant log ;
+- `lib/network/networkErrors.ts` : `DeviceNetworkError` typed + `redactText`
+  (Bearer, `sk-...`, pairing codes) ;
+- `lib/storage/connectionStorage.ts` : host/port en AsyncStorage (donnees
+  ordinaires), token de pairing en SecureStore (secret, D1/Phase 8) ;
+- `stores/connectionStore.ts` : hydrate/registerDesktop/checkHealth/
+  forgetDesktop ; aucun token dans l'etat expose ;
+- `app/(setup)/desktop.tsx` : saisie IP/port/token, test de connexion,
+  statut, oublie de session.
+
+Reste Phase 6 : POST /api/device-config avec config complete + ack/warnings
+et flux pairing authentifie avant la Phase 7.
 
 ---
 

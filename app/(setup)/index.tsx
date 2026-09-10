@@ -15,8 +15,9 @@ type MenuEntry = {
     | '/environment'
     | '/providers'
     | '/vrm-select'
-    | '/review'
-    | '/avatar-preview';
+     | '/review'
+     | '/avatar-preview'
+     | '/desktop';
 };
 
 /**
@@ -65,8 +66,13 @@ export default function SetupIndexScreen() {
     },
     {
       title: "Aperçu de l'avatar",
-      subtitle: 'Preview du modèle sélectionné (rendu 3D en Phase 4)',
+      subtitle: 'Preview du modèle sélectionné (rendu 3D natif)',
       href: '/avatar-preview',
+    },
+    {
+      title: 'Desktop',
+      subtitle: 'Connecter votre poste Desktop Liteforms (LAN)',
+      href: '/desktop',
     },
   ];
 
