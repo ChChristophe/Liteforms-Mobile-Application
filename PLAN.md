@@ -411,17 +411,27 @@ La decision par defaut ci-dessus est ajustee par l'utilisateur :
 
 ### D3 — Connexion initiale
 
-Ordre recommande :
+Decision produit — 10/09/2026 : **Option A, provisioning par hotspot
+Electron**.
 
-1. saisie manuelle de l'IP et du port ;
-2. saisie du code/token de pairing ;
-3. test `GET` de sante ;
-4. envoi d'une configuration minimale ;
-5. mDNS ;
-6. provisioning hotspot et configuration Wi-Fi automatisee.
+1. Electron demarre un hotspot temporaire `Liteforms-Setup-XXXX` ;
+2. Electron ecoute son adresse de provisioning (exemple
+   `192.168.4.1:8080` ; le port est configurable, jamais 80 sans privilege) ;
+3. le Mobile rejoint ce hotspot via les reglages Wi-Fi du systeme ;
+4. le Mobile appelle `GET /api/provisioning/health` ;
+5. le Mobile envoie le SSID et le mot de passe du Wi-Fi cible via
+   `POST /api/provisioning/wifi` ;
+6. Electron ferme le hotspot, rejoint le Wi-Fi cible et expose ensuite
+   `GET /api/health` puis `POST /api/device-config` sur le LAN normal.
 
-Ne pas commencer par mDNS ou par le controle Wi-Fi natif. iOS ne permet pas
-de garantir la selection programmatique d'un reseau Wi-Fi.
+Electron ne montre aucun code, QR code, menu ou ecran de configuration : son
+unique affichage reste l'avatar. Le Mobile ne promet pas de selection Wi-Fi
+automatique sur iOS ; il guide l'utilisateur vers les reglages systeme.
+
+La v1 considere le LAN local de confiance et ne met pas de token de pairing
+dans `device-config`. Les credentials Wi-Fi sont limites a la route de
+provisioning, jamais logges ni renvoyes. La spec complete pour Electron vit
+dans `docs/contract/README.md` et ses exemples JSON.
 
 ### D4 — Version minimale du protocole
 
@@ -505,11 +515,18 @@ Desktop.
 
 ### 5.2 Enveloppe de requete
 
-Les secrets d'authentification ne font pas partie de la configuration :
+La configuration ordinaire ne contient aucun secret provider. En v1, le
+Desktop est joignable sur le LAN local de confiance :
 
 ```text
 POST /api/device-config
-Authorization: Bearer <pairing-token>
+Content-Type: application/json
+```
+
+Le mot de passe WiFi est envoye uniquement pendant le provisioning hotspot :
+
+```text
+POST /api/provisioning/wifi
 Content-Type: application/json
 ```
 
@@ -1213,17 +1230,19 @@ Ajouter la communication LAN la plus simple avant la decouverte automatique.
 - D1 a D4 resolues ;
 - route Electron implementee et testee ;
 - payload `DeviceConfig` valide ;
-- pairing explicite.
+- hotspot de provisioning Electron implementable ;
+- aucun code ou ecran de configuration requis sur Electron.
 
 #### Premier flux
 
 ```text
 Mobile
-  -> saisie IP/port
-  -> saisie code/token
-  -> GET health/capabilities
-  -> affichage nom/version Desktop
-  -> POST config complete
+  -> rejoint le hotspot Electron via les reglages WiFi systeme
+  -> GET /api/provisioning/health
+  -> POST /api/provisioning/wifi (SSID/mot de passe cible)
+  -> Electron rejoint le WiFi cible
+  -> GET /api/health sur le LAN normal
+  -> POST /api/device-config
   -> affichage ack/warnings
   -> affichage statut applique
 ```
@@ -1264,32 +1283,35 @@ app/(main)/connection.tsx
 
 - un appareil Mobile peut se connecter a Electron sur le LAN ;
 - une mauvaise IP produit une erreur lisible ;
-- un mauvais token est refuse ;
+- un hotspot de provisioning accepte un SSID/mot de passe valide ;
 - une configuration valide est accusee et appliquee ;
 - un Desktop indisponible ne bloque pas l'UI ;
 - aucune cle provider n'est retournee par Electron.
 
-#### Statut Phase 6 — 10/09/2026 : DEBUT (slice 1)
+#### Statut Phase 6 — 10/09/2026 : DEBUT (slice 1, contrat provisioning ajuste)
 
-Premier slice livre (20 tests verts) :
+Premier slice adapte au flux hotspot Electron (44 tests verts) :
 
-- `types/device.ts` : contrat health/capacites Desktop (forme minimale issue
-  de ce plan, v. 5.2) — flag D4 : doit etre confirme avec
-  `liteforms-electron` avant la suite ;
+- `types/device.ts` : contrats de health normal, health provisioning et
+  payload WiFi cible ;
 - `lib/network/deviceClient.ts` : URL/validations IPv4+port (D3 : IP
-  manuelle), `GET /api/health` avec AbortController timeout 4 s,
-  distinction timeout/injoignable/HTTP/payload, redaction avant log ;
+  manuelle), health normal/provisioning avec AbortController timeout 4 s,
+  `POST /api/provisioning/wifi`, distinction timeout/injoignable/HTTP/payload,
+  redaction avant log ;
 - `lib/network/networkErrors.ts` : `DeviceNetworkError` typed + `redactText`
-  (Bearer, `sk-...`, pairing codes) ;
+  (Bearer, `sk-...`, mots de passe de diagnostics) ;
 - `lib/storage/connectionStorage.ts` : host/port en AsyncStorage (donnees
-  ordinaires), token de pairing en SecureStore (secret, D1/Phase 8) ;
+  ordinaires), aucun token de pairing ;
 - `stores/connectionStore.ts` : hydrate/registerDesktop/checkHealth/
-  forgetDesktop ; aucun token dans l'etat expose ;
-- `app/(setup)/desktop.tsx` : saisie IP/port/token, test de connexion,
-  statut, oublie de session.
+  provisionWifi/forgetDesktop ; le mot de passe WiFi n'entre jamais dans
+  l'etat du store ;
+- `app/(setup)/desktop.tsx` : saisie IP/port, SSID et mot de passe WiFi,
+  test de connexion, envoi du provisioning, statut et oubli des coordonnees ;
+- `docs/contract/` : README et exemples JSON transmis a l'agent Electron.
 
-Reste Phase 6 : POST /api/device-config avec config complete + ack/warnings
-et flux pairing authentifie avant la Phase 7.
+Reste Phase 6 : `POST /api/device-config` avec config complete +
+ack/warnings. La v1 considere le LAN local de confiance ; aucun pairage
+visible ou token n'est requis.
 
 ---
 
