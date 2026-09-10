@@ -1,0 +1,5 @@
+{
+  "ssid": "MaisonWifi",
+  "password": "mot-de-passe-wifi",
+  "security": "WPA2-PSK"
+}

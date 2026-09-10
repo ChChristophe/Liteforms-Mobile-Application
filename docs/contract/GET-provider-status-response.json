@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "providers": {
+    "llm": {
+      "provider": "openai",
+      "configured": true,
+      "maskedKey": "sk-****"
+    },
+    "tts": {
+      "provider": "elevenlabs",
+      "configured": false,
+      "maskedKey": null
+    },
+    "stt": {
+      "provider": "deepgram",
+      "configured": false,
+      "maskedKey": null
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "mode": "provisioning",
+  "deviceId": "desktop-8f31",
+  "name": "Liteforms Desktop",
+  "protocolVersion": "1.0",
+  "port": 8080
+}

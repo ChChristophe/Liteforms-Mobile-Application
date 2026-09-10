@@ -1,0 +1,46 @@
+{
+  "configVersion": "1.0",
+  "character": {
+    "name": "Clawdia",
+    "pronouns": "SHE",
+    "personality": "Curieuse et taquine.",
+    "greeting": "Salut !"
+  },
+  "avatar": {
+    "mood": "happy",
+    "modelRef": {
+      "id": "lobsterEdit",
+      "fileName": "lobsterEdit.vrm",
+      "hash": null
+    },
+    "pose": {
+      "avatarYaw": 0,
+      "alcoveYaw": 0,
+      "zoom": 1,
+      "depth": 0
+    }
+  },
+  "environment": {
+    "alcoveColor": "#4a90d9"
+  },
+  "providers": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "endpoint": "https://api.openai.com/v1",
+      "voiceId": null
+    },
+    "tts": {
+      "provider": "elevenlabs",
+      "model": "eleven_flash_v2_5",
+      "endpoint": "https://api.elevenlabs.io/v1",
+      "voiceId": "CwhRBWXzGAHq8TQ4Fs17"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3",
+      "endpoint": "https://api.deepgram.com/v1",
+      "voiceId": null
+    }
+  }
+}
