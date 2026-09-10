@@ -18,7 +18,10 @@ Liteforms est scindé en **deux applications** :
 
 2. **Liteforms Mobile (Expo)** — **ce repo**
    - **Remote control / Configuration uniquement**
-   - Configure les providers (LLM, TTS, STT) et stocke les credentials
+   - Configure les providers (LLM, TTS, STT) ; la clé est saisie sur Mobile
+     et transférée une seule fois à Electron (décision D1) : jamais stockée
+     sur Mobile (ni AsyncStorage, ni SecureStore), jamais renvoyée par
+     Electron (statut masqué type `sk-****` uniquement)
    - Configure la personnalité de l'avatar (nom, pronoms, personnalité, mood)
    - Configure l'environnement (couleur alcove)
    - Sélectionne le modèle VRM

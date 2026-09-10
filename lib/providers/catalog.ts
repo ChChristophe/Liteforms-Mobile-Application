@@ -10,8 +10,9 @@
  * - seuls les providers marques `tested` cote Web sont exposes ;
  * - les providers d'execution navigateur sont exclus (`browser-local-*`,
  *   kokoro local, distil-whisper) : le runtime configure est le Desktop.
- * - les credentials ne sont PAS dans ce catalogue (D1 : ils vivent sur
- *   Electron ; le statut masque viendra des reponses Desktop).
+ * - les credentials ne sont PAS dans ce catalogue (D1 : la cle est saisie
+ *   sur Mobile et transferee une seule fois a Electron en Phase 8 ; le
+ *   statut configure/non-configure viendra des reponses Desktop).
  */
 import type { LlmProviderId, SttProviderId, TtsProviderId } from "../../types/config";
 

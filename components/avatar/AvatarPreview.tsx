@@ -39,8 +39,24 @@ type PreviewStatus =
   | { kind: 'ready' }
   | { kind: 'error'; message: string };
 
+/** Props publiques du preview : callbacks de mesures pour le harnais Phase 4. */
+type AvatarPreviewProps = {
+  /** Appelé une fois par montage quand la scene est prete (temps de chargement ms). */
+  onReady?: (loadMs: number) => void;
+  /** Appelé une fois par montage en cas d'echec de chargement. */
+  onError?: (message: string) => void;
+  /** Evenement d'etape de chargement, pour le harnais de validation. */
+  onStage?: (stage: 'mounted' | 'context' | 'assets' | 'runtime' | 'loop-start') => void;
+  /**
+   * Increment pour redemander un rechargement du runtime SANS remonter le
+   * GLView (harnais Phase 4 : cycles de rechargement probabilisant un seul
+   * contexte EGL). 0 = aucun reload demande.
+   */
+  reloadSignal?: number;
+};
+
 /**
- * Preview natif de l'avatar VRM (Phase 4.1-4.2).
+ * Preview natif de l'avatar VRM (Phase 4.1-4.2, strategie runtime rechargeable).
  *
  * Pipeline : GLView.onContextCreate → runtime three.js (renderer, VRM,
  * alcove, VRMA) → boucle RAF promise au composant.
@@ -49,15 +65,25 @@ type PreviewStatus =
  * - la boucle RAF est arretee au unmount, sur background (AppState) et sur
  *   erreur fatale ; relancee au foreground si prete ;
  * - AUCUN setState par frame : la boucle met a jour uniquement le runtime ;
- * - le GLView est remonte par `key` quand le modele change (modelRef.id) ou
- *   au retry : la strategie de rechargement minimale demandee par la
- *   sous-phase 4.2 ;
+ * - le GLView est cree UNE FOIS par montage de composant (key = retryCounter,
+ *   remontage complet reserve au retry apres erreur) ; un changement de
+ *   modele ou `reloadSignal` reinitialise le runtime sur le MEME contexte :
+ *   le remontage natif du GLView a prouve instable (deadlock du thread UI
+ *   pendant la destruction du contexte EGL) — strategie 4.2 « runtime
+ *   chargeable », fiche de portage Phase 4 ;
  * - dispose() du runtime libere geometries, materiaux, textures, mixer et
- *   renderer ; le contexte GL est detruit a l'unmount du GLView.
+ *   renderer ; le contexte GL vit avec le GLView.
  *
- * Au demontage : cancelAnimationFrame, dispose runtime, destroyContextAsync.
+ * Au demontage : cancelAnimationFrame, dispose runtime ; le contexte GL est
+ * detruit nativement avec le GLView (destroyContextAsync est reserve aux
+ * contexts headless : l'appeler sur une vue casse le montage suivant).
  */
-export const AvatarPreview = memo(function AvatarPreview() {
+export const AvatarPreview = memo(function AvatarPreview({
+  onReady,
+  onError,
+  onStage,
+  reloadSignal = 0,
+}: AvatarPreviewProps = {}) {
   /** Cle de remontage : id du modele courant du store. */
   const modelRefId = useConfigStore((state) => state.config.avatar.modelRef.id);
   /** 4.4 : tint alcove et mood appliques au runtime SANS remontage du GLView. */
@@ -118,6 +144,11 @@ export const AvatarPreview = memo(function AvatarPreview() {
     useConfigStore.getState().updateAvatar({ pose: DEFAULT_AVATAR_POSE });
   }, []);
 
+  // Harnais Phase 4 : evenement de montage.
+  useEffect(() => {
+    onStage?.('mounted');
+  }, [onStage]);
+
   const stopLoop = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -161,7 +192,13 @@ export const AvatarPreview = memo(function AvatarPreview() {
   /** Chaine de chargement declenchee par onContextCreate. */
   const loadScene = useCallback(
     async (gl: ExpoWebGLRenderingContext, width: number, height: number) => {
+      // Generation : un chargement plus recent invalide le resultat du
+      // precedent (double declenchement effet/onContextCreate perilouse).
+      const generation = ++loadGenerationRef.current;
+      const isCurrent = () => generation === loadGenerationRef.current;
       setStatus({ kind: 'loading' });
+      const startedAt = Date.now();
+      onStage?.('context');
       const uninstallTextureSupport = installNativeTextureSupport();
       try {
         const [vrm, alcove, animation] = await Promise.all([
@@ -175,11 +212,18 @@ export const AvatarPreview = memo(function AvatarPreview() {
             require('../../assets/animations/idle_loop.vrma')
           ),
         ]);
+        if (!isCurrent()) return;
+        onStage?.('assets');
         const runtime = await startPreviewRuntime(gl, width, height, {
           vrm,
           alcove,
           animation,
         });
+        if (!isCurrent()) {
+          runtime.dispose();
+          return;
+        }
+        onStage?.('runtime');
         runtimeRef.current = runtime;
         // Etat courant du store au moment de la creation (4.4 + pose) : un
         // changement arrive pendant le chargement n'est pas perdu.
@@ -190,42 +234,68 @@ export const AvatarPreview = memo(function AvatarPreview() {
         if (appStateRef.current === 'active') {
           setStatus({ kind: 'ready' });
           startLoopIfReady();
+          onStage?.('loop-start');
         }
+        onReady?.(Date.now() - startedAt);
       } catch (error) {
+        if (!isCurrent()) return;
         stopLoop();
         runtimeRef.current = null;
-        setStatus({
-          kind: 'error',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'Erreur inconnue pendant le chargement du preview.',
-        });
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Erreur inconnue pendant le chargement du preview.';
+        setStatus({ kind: 'error', message });
+        onError?.(message);
         if (__DEV__) console.warn('[AvatarPreview] load failed', error);
       } finally {
         uninstallTextureSupport();
       }
     },
-    [startLoopIfReady, stopLoop]
+    [onReady, onError, onStage, startLoopIfReady, stopLoop]
   );
 
-  /** Genre un nettoyage complet du runtime + contexte GL (gates 4.1). */
-  const releaseAll = useCallback(() => {
+  const glRef = useRef<ExpoWebGLRenderingContext | null>(null);
+  /** Dimensions figurees du contexte GL, pour les rechargements runtime. */
+  const contextSizeRef = useRef({ width: 0, height: 0 });
+  /** Generation de chargement : seul le dernier loadScene peut attacher un runtime. */
+  const loadGenerationRef = useRef(0);
+
+  /**
+   * Libere le runtime (boucle, ressources GPU, cache textures) SANS toucher
+   * au contexte GL, qui reste propriete du GLView. Avant tout rechargement ;
+   * la purge des fichiers texture est sur : aucun render paresseux en cours.
+   */
+  const teardownRuntime = useCallback(() => {
     stopLoop();
     runtimeRef.current?.dispose();
     runtimeRef.current = null;
-    const gl = glRef.current;
-    if (gl !== null) {
-      void GLView.destroyContextAsync(gl.contextId);
-      glRef.current = null;
-    }
-    // Purge des fichiers textures du cache : sur, car tout render est arrete.
     void purgeTextureCache();
   }, [stopLoop]);
 
-  const glRef = useRef<ExpoWebGLRenderingContext | null>(null);
+  /** Cleanup total a l'unmount du COMPOSANT. */
+  const releaseAll = useCallback(() => {
+    teardownRuntime();
+    glRef.current = null;
+  }, [teardownRuntime]);
 
   useEffect(() => releaseAll, [releaseAll]);
+
+  // Rechargement runtime sans remonter le GLView (4.2, fallback choisi
+  // apres preuve device) : changement de modele ou reloadSignal increment.
+  const firstSyncRef = useRef(true);
+  useEffect(() => {
+    // Le premier rendu est couvert par onContextCreate.
+    if (firstSyncRef.current) {
+      firstSyncRef.current = false;
+      return;
+    }
+    const gl = glRef.current;
+    const { width, height } = contextSizeRef.current;
+    if (gl === null || width === 0) return;
+    teardownRuntime();
+    void loadScene(gl, width, height);
+  }, [modelRefId, reloadSignal, teardownRuntime, loadScene]);
 
   /**
    * Geste 4.5 : pan horizontal. Cible decidee AU DEBUT du drag — point dans
@@ -334,10 +404,16 @@ export const AvatarPreview = memo(function AvatarPreview() {
           }}
         >
           <GLView
-            key={`${modelRefId}-${retryCounter}`}
+            /* Un seul contexte GL pour la vie du composant (4.2 fallback) :
+               modele/retry avec reload runtime sauf retry (pert/*.key). */
+            key={retryCounter}
             style={StyleSheet.absoluteFill}
             onContextCreate={(gl) => {
               glRef.current = gl;
+              contextSizeRef.current = {
+                width: gl.drawingBufferWidth,
+                height: gl.drawingBufferHeight,
+              };
               void loadScene(gl, gl.drawingBufferWidth, gl.drawingBufferHeight);
             }}
           />

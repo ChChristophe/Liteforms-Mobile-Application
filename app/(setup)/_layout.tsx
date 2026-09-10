@@ -1,4 +1,6 @@
 import { Stack } from 'expo-router';
+import { Link } from 'expo-router';
+import { Pressable, Text } from 'react-native';
 
 /**
  * Layout du groupe `(setup)`.
@@ -33,8 +35,24 @@ export default function SetupLayout() {
       />
       <Stack.Screen
         name="avatar-preview"
-        options={{ headerShown: true, title: "Aperçu de l'avatar" }}
+        options={{
+          headerShown: true,
+          title: "Aperçu de l'avatar",
+          headerRight: () =>
+            // Harnais Phase 4 : lien de test uniquement en developpement ;
+            // masque du build de production (Phase 10).
+            __DEV__ ? (
+              <Link href="/avatar-validation" asChild>
+                <Pressable hitSlop={12}>
+                  <Text style={{ color: '#4a90d9', fontWeight: '600' }}>
+                    Test
+                  </Text>
+                </Pressable>
+              </Link>
+            ) : null,
+        }}
       />
+      <Stack.Screen name="avatar-validation" options={{ headerShown: true, title: 'Validation Phase 4' }} />
     </Stack>
   );
 }

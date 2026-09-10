@@ -335,9 +335,10 @@ export function installNativeTextureSupport(): () => void {
  * `renderer.render()` ; purger avant = texture vide => avatar noir.
  */
 export async function purgeTextureCache(): Promise<void> {
-  while (tempFiles.length > 0) {
-    const file = tempFiles.pop();
-    if (!file) break;
+  // Snapshot : splice empeche de supprimer une fichier ajoute PENDANT la
+  // purge (ex. chargement du montage suivant deja demarre).
+  const files = tempFiles.splice(0, tempFiles.length);
+  for (const file of files) {
     try {
       await FileSystem.deleteAsync(file, { idempotent: true });
     } catch {

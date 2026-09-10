@@ -30,8 +30,8 @@ import { useConfigStore } from '../../stores/configStore';
  * - catalogues STATIQUES (`lib/providers/catalog`) : aucun appel API, aucune
  *   decouverte de modeles en direct ;
  * - le Mobile ne teste jamais la configuration (pas d'appel d'endpoint) ;
- * - aucune saisie de cle API (D1 : credentials sur Electron, transfert
- *   unique gere en Phase 8) ;
+ * - saisie de cle API possible (D1 : transfert unique authentifie a
+ *   Electron en Phase 8, jamais persiste sur Mobile) ;
  * - changer de provider reinitialise model/endpoint/voie aux defauts du
  *   catalogue.
  *

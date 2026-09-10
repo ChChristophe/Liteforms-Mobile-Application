@@ -1031,9 +1031,55 @@ Tester au minimum :
 - temps de chargement et memoire mesures sur appareil ;
 - le modele par defaut reste disponible hors reseau.
 
-#### Statut Phase 4 — 09/09/2026 : PARTIELLEMENT VALIDE
+#### Statut Phase 4 — 10/09/2026 : VALIDE (Android, Expo Go)
 
-Le blocage critique du rendu est leve. Sur appareil Android (Expo Go), le
+Sur appareil Android (Expo Go), les gates de sortie passees en run :
+
+- **10 rechargements de runtime completes** sur LE MEME contexte GL, sans
+  rendu duplique (harnais `app/(setup)/avatar-validation.tsx`) ;
+- temps de chargement journalises par cycle ;
+- test background/foreground execute avec journal des transitions `AppState` ;
+- erreurs chargeables avec retry (overlay loading/error/ready).
+
+Strategie 4.2 **ajustee apres preuve device** : le remontage natif du GLView
+(creation/destruction du contexte EGL) provoque un gel du thread UI sous
+Expo Go — presente a plusieurs reprises (blocages cycles 2-4, boutons
+inertes, ecran noir). Fallback prevu par le plan et retenu : le GLView
+est cree une seule fois par montage du composant ; changement de modele ou
+signal `reloadSignal` = rechargement du runtime three.js sur le meme contexte
+(teardownRuntime + loadScene, guard de generation contre les double-loads).
+Le gate « dix montages/demontages » est reinterprete en « dix rechargements
+de runtime » ; le montage/demontage complet du composant reste couvert par la
+navigation reelle de l'app (retour avant/arriere ecran setup).
+
+##### Fiche d'audit des bugs rencontres pendant la validation device
+
+1. `GLView.destroyContextAsync()` (expo-gl 57) est reserve aux contexts
+   headless (`createContextAsync`). L'appeler sur le contexte d'une vue
+   cassait le `onContextCreate` du montage suivant. Corrige : le contexte
+   vit et meurt avec le GLView ; `dispose` du runtime + purge textures
+   suffisent au cleanup composant.
+2. Purge du cache texture en boucle `while (pop)` : un fichier pousse par le
+   chargement du cycle suivant pouvait etre supprime pendant les awaits de
+   la purge precedente. Corrige par snapshot `splice(0, length)`.
+3. Strategie remontage GLView abandonnee (deadlock natif Expo Go, cf.
+   statut ci-dessus) au profit du runtime rechargeable.
+4. Harnais : `reloadSignal` doit etre passe explicitement a `AvatarPreview`
+   (bug introduit puis corrige) ; cles de journal avec suffixe aleatoire
+   (Fast Refresh conservait l'etat `log` et dupliquait les ids) ;
+   watchdog 15 s par cycle pour detecter un chargement silencieusement mort.
+
+##### Limites connues restantes
+
+- non teste sur appareil iOS reel (gate reportee a Phase 10) ;
+- mesure memoire : lecture via profiler Android, pas par le harnais ;
+- route `avatar-validation` embarquee dans le bundle : entree masquee en
+  production mais ecran a retirer avant build distribue (Phase 10) ;
+- fichiers texture du cache vivent jusqu'au demontage du composant
+  (contrainte de l'upload paresseux).
+
+Historique de la phase (premiere validation partielle du 09/09/2026) : le
+blocage critique du rendu a ete leve. Sur appareil Android (Expo Go), le
 preview affiche le VRM bundle **texture, anime (idle VRMA) et eclaire**.
 Sous-phases 4.1 (cycle de vie), 4.2 (remount par cle), 4.3 (textures),
 4.4 (tint alcove live + mood par expressions, sans recharger le VRM) et
@@ -1042,8 +1088,8 @@ pinche, profondeur au pan 2 doigts, tous borne cote runtime) implementees.
 Pose (yaws, zoom, profondeur) persistee dans `DeviceConfig.avatar.pose`
 (decision produit du 09/09/2026, cf. 5.1) : commit au store en fin de
 geste seulement, jamais par frame ; migration des configs stockees sans
-`pose` vers les defauts. Reste a faire : validation appareil complete
-(10 montages, background/foreground, mesures), les gates ci-dessous.
+`pose` vers les defauts. Confirme en workload reel le 10/09/2026 (cf.
+statut ci-dessus).
 
 ##### Fiche d'audit du rendu — trois bugs racine identifies et corriges
 
@@ -1101,8 +1147,9 @@ Corrections d'accompagnement :
 - `stb_image` ne decode que JPEG/PNG : un VRM texte en WebP echouera
   silencieusement (texture noire) — a surveiller si des VRM utilisateur
   arrivent en Phase 5 ;
-- gates non verifiees : 10 montages/demontages, background/foreground,
-  changement de modele, mesures memoire/temps, appareil iOS.
+- historique (verifiees le 10/09/2026, cf. statut en tete de phase) :
+  rechargements runtime, background/foreground, changement de modele ;
+  restent non verifies : mesures memoire, appareil iOS.
 
 ---
 
