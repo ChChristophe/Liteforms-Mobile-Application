@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   fetchDesktopHealth,
   fetchProvisioningHealth,
+  sendDeviceConfig,
   sendWifiProvisioning,
 } from "../lib/network/deviceClient";
 import {
@@ -9,7 +10,11 @@ import {
   loadConnectionInfo,
   saveConnectionInfo,
 } from "../lib/storage/connectionStorage";
-import type { WifiProvisioningRequest } from "../types/device";
+import type {
+  DeviceConfigSendResult,
+  WifiProvisioningRequest,
+} from "../types/device";
+import type { DeviceConfig } from "../types/config";
 
 /**
  * Etat de connexion au Desktop (PLAN.md Phase 6, premier flux D3).
@@ -49,6 +54,14 @@ export type ConnectionStore = {
    * Le mot de passe reste dans l'appel et n'entre jamais dans le store.
    */
   provisionWifi: (payload: WifiProvisioningRequest) => Promise<CheckResult>;
+  /**
+   * Envoie la configuration complete au Desktop connecte (host/port connus).
+   * La config ne porte aucun secret (D1).
+   *
+   * @param config configuration validee en amont (`validateDeviceConfig`).
+   * @returns accuse de reception avec warnings, ou erreur exploitable.
+   */
+  sendConfig: (config: DeviceConfig) => Promise<DeviceConfigSendResult>;
   /** Relance un health check sur les coordonnees connues. */
   checkHealth: () => Promise<{ ok: boolean; errors: string[] }>;
   /** Oublie les coordonnees du Desktop. */
@@ -77,7 +90,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
       await saveConnectionInfo(host, port);
       const check = await fetchDesktopHealth(host, port);
       if (check.ok) {
-        set({ connectedDesktop: check.desktopName });
+        set({ host, port, connectedDesktop: check.desktopName });
         return { ok: true, errors: [] };
       }
       set({ connectedDesktop: null, lastError: check.error });
@@ -123,6 +136,16 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
     } finally {
       set({ checking: false });
     }
+  },
+
+  sendConfig: async (config) => {
+    const { host, port } = get();
+    if (host === null || port === null) {
+      return { ok: false, error: "Aucun Desktop connecté." };
+    }
+    const result = await sendDeviceConfig(host, port, config);
+    if (!result.ok) set({ lastError: result.error });
+    return result;
   },
 
   forgetDesktop: async () => {

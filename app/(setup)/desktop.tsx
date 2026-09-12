@@ -157,11 +157,11 @@ export default function DesktopScreen() {
           <Text style={styles.secondaryButtonText}>Envoyer le WiFi a Electron</Text>
         </Pressable>
 
-        {connectedDesktop !== null && (
+        {connectedDesktop !== null && host !== null && port !== null && (
           <View style={styles.statusCard}>
             <Text style={styles.statusOk}>Connecté : {connectedDesktop}</Text>
             <Text style={styles.statusText}>
-              {buildDesktopUrl(host ?? '', port ?? 0)}
+              {buildDesktopUrl(host, port)}
             </Text>
           </View>
         )}
