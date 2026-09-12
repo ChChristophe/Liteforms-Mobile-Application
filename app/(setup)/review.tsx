@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { type DeviceConfig } from '../../types/config';
 import { validateDeviceConfig } from '../../lib/config/validation';
 import { useConfigStore } from '../../stores/configStore';
+import { useConnectionStore } from '../../stores/connectionStore';
 
 /**
  * Recapitulatif navigable de la configuration (Phase 3 etape 6).
@@ -18,9 +20,12 @@ import { useConfigStore } from '../../stores/configStore';
  * - re-valide la configuration complete avec `validateDeviceConfig` et
  *   affiche le statut global plus les erreurs champ par champ ; c'est la
  *   meme barriere qui bloquera l'envoi en Phase 6 ;
- * - bouton d'envoi en PLACEHOLDER : la connexion Desktop arrive en Phase 6
- *   (route `/api/device-config`, provisioning WiFi, cf. PLAN.md). Desactive tant que
- *   la configuration est invalide.
+ * - bouton d'envoi branche sur `connectionStore.sendConfig` (Phase B, route
+ *   contractuelle `POST /api/device-config`) : accuse de reception affiche
+ *   avec `appliedAt` et warnings (ex. mood/pose non appliques) ; erreur
+ *   contractuelle ou reseau affichee dans le style existant. Desactive si la
+ *   configuration est invalide, si aucun Desktop n'est connecte, ou pendant
+ *   l'envoi.
  * - "Reinitialiser" restaure les defauts du store.
  *
  * Aucun secret n'apparait (D1) : la configuration affichee est non secrete
@@ -75,7 +80,39 @@ function SectionLink({
 export default function ReviewScreen() {
   const config = useConfigStore((state) => state.config);
   const resetConfig = useConfigStore((state) => state.resetConfig);
+  const sendConfig = useConnectionStore((state) => state.sendConfig);
+  const connectedDesktop = useConnectionStore((state) => state.connectedDesktop);
   const validation = validateDeviceConfig(config);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendAck, setSendAck] = useState<{
+    appliedAt: string;
+    warnings: string[];
+  } | null>(null);
+
+  const handleSend = async () => {
+    if (!validation.ok || sending) return;
+    setSending(true);
+    setSendError(null);
+    setSendAck(null);
+    try {
+      const result = await sendConfig(validation.config);
+      if (result.ok) {
+        setSendAck({ appliedAt: result.appliedAt, warnings: result.warnings });
+      } else {
+        setSendError(result.error);
+      }
+    } catch (error) {
+      // sendConfig ne doit jamais lever, mais un crash ne doit pas laisser
+      // le bouton bloqué en "sending" pour toujours (bug observé au test
+      // terrain : bouton non réactivable après le premier envoi).
+      setSendError(
+        error instanceof Error ? error.message : "Erreur d'envoi inconnue."
+      );
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -138,18 +175,41 @@ export default function ReviewScreen() {
         </SectionLink>
 
         <Pressable
-          style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}
-          disabled={!validation.ok}
+          style={({ pressed }) => [
+            styles.sendButton,
+            (!validation.ok || connectedDesktop === null || sending) && styles.sendDisabled,
+            pressed && styles.pressed,
+          ]}
+          disabled={!validation.ok || connectedDesktop === null || sending}
           accessibilityRole="button"
           accessibilityLabel="Envoyer la configuration au Desktop"
-          onPress={() => {
-            // Phase 6 : envoi reel via lib/network/deviceClient
-            // (provisioning WiFi + endpoint /api/device-config). Placeholder volontaire.
-          }}
+          onPress={handleSend}
         >
-          <Text style={styles.sendText}>Envoyer au Desktop</Text>
-          <Text style={styles.sendSub}>Connexion Desktop — Phase 6</Text>
+          <Text style={styles.sendText}>
+            {sending ? 'Envoi en cours…' : 'Envoyer au Desktop'}
+          </Text>
+          <Text style={styles.sendSub}>
+            {connectedDesktop === null
+              ? 'Aucun Desktop connecté'
+              : `Connecté : ${connectedDesktop}`}
+          </Text>
         </Pressable>
+
+        {sendAck !== null && (
+          <View style={styles.ackCard}>
+            <Text style={styles.ackTitle}>
+              Configuration reçue par le Desktop ({sendAck.appliedAt})
+            </Text>
+            {sendAck.warnings.map((warning) => (
+              <Text key={warning} style={styles.ackWarning}>
+                ⚠ {warning}
+              </Text>
+            ))}
+          </View>
+        )}
+        {sendError !== null && (
+          <Text style={styles.errorLine}>{sendError}</Text>
+        )}
 
         <Pressable
           style={styles.resetLink}
@@ -269,6 +329,27 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 12,
     color: '#dbeafe',
+  },
+  sendDisabled: {
+    opacity: 0.5,
+  },
+  ackCard: {
+    marginTop: 12,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#16a34a',
+    backgroundColor: '#f0fdf4',
+  },
+  ackTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  ackWarning: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#92400e',
   },
   resetLink: {
     marginTop: 24,

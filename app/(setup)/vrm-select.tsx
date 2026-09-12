@@ -1,14 +1,26 @@
-import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConfigStore } from '../../stores/configStore';
+import { useConnectionStore } from '../../stores/connectionStore';
+import { fetchVrmList } from '../../lib/network/deviceClient';
+import type { VrmSummary } from '../../types/device';
 
 /**
  * Ecran de selection du modele VRM (Phase 3 etape 5, decision D2 ajustee).
  *
- * Etat actuel : la reference `{id, fileName, hash}` est editable a la main ;
- * le modele par defaut `lobsterEdit.vrm` est presente en bundle pour le
- * preview. Aucun binaire n'est gere par cet ecran aujourd'hui.
+ * Etat actuel : si un Desktop est connecte (connectionStore), la
+ * bibliothèque reelle `GET /api/poc/vrms` (Phase C) est affichee et
+ * selectionnable ; sinon la reference `{id, fileName, hash}` reste editable
+ * a la main (fallback hors ligne, POC utilisable sans Desktop).
  *
  * Comportement final voulu (D2 ajustee, reporte) : selection dans le
  * catalogue du Desktop puis telechargement Desktop -> Mobile ; le VRM
@@ -27,12 +39,53 @@ import { useConfigStore } from '../../stores/configStore';
  *
  * Au demontage : le store conserve la derniere reference valide.
  */
+/** Taille lisible en Mo (une decimale). */
+function formatMo(sizeBytes: number): string {
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
 export default function VrmSelectScreen() {
   const modelRef = useConfigStore((state) => state.config.avatar.modelRef);
   const updateAvatar = useConfigStore((state) => state.updateAvatar);
+  const host = useConnectionStore((state) => state.host);
+  const port = useConnectionStore((state) => state.port);
+  const connectedDesktop = useConnectionStore((state) => state.connectedDesktop);
 
   const [idError, setIdError] = useState<string | null>(null);
   const [fileNameError, setFileNameError] = useState<string | null>(null);
+  const [vrms, setVrms] = useState<VrmSummary[] | null>(null);
+  const [vrmsLoading, setVrmsLoading] = useState(false);
+  const [vrmsError, setVrmsError] = useState<string | null>(null);
+
+  // Au montage : charge la bibliotheque VRM reelle du Desktop connecte.
+  // Site non connecte ou erreur : la reference manuelle reste utilisable.
+  useEffect(() => {
+    let cancelled = false;
+    if (connectedDesktop === null || host === null || port === null) {
+      return;
+    }
+    setVrmsLoading(true);
+    setVrmsError(null);
+    void (async () => {
+      const result = await fetchVrmList(host, port);
+      if (cancelled) return;
+      setVrmsLoading(false);
+      if (result.ok) setVrms(result.vrms);
+      else setVrmsError(result.error);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [connectedDesktop, host, port]);
+
+  /** Selection dans le catalogue : modelRef {id, fileName, hash: null} (D2). */
+  function selectVrm(vrm: VrmSummary): void {
+    setIdError(null);
+    setFileNameError(null);
+    updateAvatar({
+      modelRef: { id: vrm.id, fileName: vrm.fileName, hash: null },
+    });
+  }
 
   /** Commite l'id et affiche l'erreur de champ si vide. */
   function commitId(value: string): void {
@@ -54,7 +107,7 @@ export default function VrmSelectScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.label}>Modèle actuel</Text>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{modelRef.fileName}</Text>
@@ -64,7 +117,48 @@ export default function VrmSelectScreen() {
           </Text>
         </View>
 
-        <Text style={styles.label}>Identifiant de catalogue (id)</Text>
+        <Text style={styles.label}>Bibliothèque du Desktop</Text>
+        {vrmsLoading && <ActivityIndicator />}
+        {vrmsError !== null && (connectedDesktop !== null) && (
+          <Text style={styles.note}>
+            Liste du Desktop indisponible ({vrmsError}). Saisie manuelle
+            ci-dessous toujours possible.
+          </Text>
+        )}
+        {connectedDesktop === null && (
+          <Text style={styles.note}>
+            Desktop non connecté : saisis la référence manuellement ci-dessous.
+          </Text>
+        )}
+        {vrms !== null && vrms.length === 0 && (
+          <Text style={styles.note}>
+            Aucun VRM dans la bibliothèque du Desktop.
+          </Text>
+        )}
+        {vrms !== null &&
+          vrms.length > 0 &&
+          vrms.map((vrm) => {
+            const selected = vrm.fileName === modelRef.fileName;
+            return (
+              <Pressable
+                key={vrm.id}
+                style={[styles.card, selected && styles.cardSelected]}
+                onPress={() => selectVrm(vrm)}
+                accessibilityLabel={`Sélectionner le modèle ${vrm.fileName}`}
+              >
+                <Text style={styles.cardTitle}>
+                  {vrm.fileName}
+                  {vrm.builtin === true ? ' (intégré)' : ''}
+                </Text>
+                <Text style={styles.cardText}>
+                  id : {vrm.id} · {formatMo(vrm.sizeBytes)}
+                  {selected ? ' · sélectionné' : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+        <Text style={[styles.label, styles.fieldGap]}>Identifiant de catalogue (id)</Text>
         <TextInput
           style={styles.input}
           value={modelRef.id}
@@ -100,7 +194,7 @@ export default function VrmSelectScreen() {
           téléchargé remplacera celui en place, un seul résident à la fois
           sur le téléphone.
         </Text>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -111,7 +205,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   content: {
-    flex: 1,
     padding: 24,
   },
   label: {
@@ -130,6 +223,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9fafb',
     padding: 16,
     gap: 4,
+  },
+  cardSelected: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   cardTitle: {
     fontSize: 16,
