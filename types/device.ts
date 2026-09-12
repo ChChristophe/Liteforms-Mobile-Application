@@ -91,3 +91,46 @@ export type DesktopHealthCheck =
       configVersionSupported: boolean;
     }
   | { ok: false; error: string };
+
+/**
+ * Reponse de `POST /api/device-config` (contrat v1, docs/contract/README.md
+ * section 4) : accuse de reception POC (`appliedAt` = « recu et parque »).
+ */
+export type DeviceConfigAck = {
+  /** `true` : la configuration a ete acceptee par le Desktop. */
+  ok: true;
+  /** Version de configuration confirmee par le Desktop. */
+  configVersion: string;
+  /** Horodatage de reception cote Desktop. */
+  appliedAt: string;
+  /** Parties recues mais non encore appliquees (ex. mood, pose). */
+  warnings: string[];
+};
+
+/**
+ * Resultat d'envoi de la configuration au Desktop, exploitable par l'UI.
+ * En echec : erreur contractuelle (`code`/`message`) ou reseau, redactee.
+ */
+export type DeviceConfigSendResult =
+  | DeviceConfigAck
+  | { ok: false; error: string };
+
+/**
+ * Metadonnees d'un VRM de `GET /api/poc/vrms` (routes POC, jamais le binaire
+ * — decision D2 : le Mobile ne reference que id/fileName).
+ */
+export type VrmSummary = {
+  /** Identifiant stable du modele dans la bibliotheque Desktop. */
+  id: string;
+  /** Nom de fichier `.vrm` utilise pour le chargement cote renderer. */
+  fileName: string;
+  /** Taille du binaire en octets. */
+  sizeBytes: number;
+  /** Vrai si le modele est celui embarque par le Desktop (lobsterEdit). */
+  builtin?: boolean;
+};
+
+/** Resultat de `fetchVrmList`, exploitable par l'UI. */
+export type VrmListResult =
+  | { ok: true; vrms: VrmSummary[] }
+  | { ok: false; error: string };

@@ -1,8 +1,15 @@
-import { DEVICE_CONFIG_VERSION } from "../../types/config";
+import {
+  DEVICE_CONFIG_VERSION,
+  type DeviceConfig,
+} from "../../types/config";
 import type {
   DesktopHealthCheck,
   DesktopHealthResponse,
+  DeviceConfigAck,
+  DeviceConfigSendResult,
   ProvisioningHealthResponse,
+  VrmListResult,
+  VrmSummary,
   WifiProvisioningRequest,
 } from "../../types/device";
 import { DESKTOP_PROTOCOL_VERSION } from "../../types/device";
@@ -298,6 +305,179 @@ export async function sendWifiProvisioning(
       };
     }
     return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Valide le corps JSON de `POST /api/device-config` en succes (contrat v1,
+ * `docs/contract/POST-device-config-response-ok.json`), sans lui faire
+ * confiance : `ok !== true`, `configVersion`/`appliedAt` non-textes ou
+ * `warnings` non-tableau de chaines sont des erreurs de payload.
+ *
+ * @param value corps, typiquement `await response.json()`.
+ */
+export function parseDeviceConfigAck(
+  value: unknown
+): { ok: true; ack: DeviceConfigAck } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse Desktop non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (
+    r.ok !== true ||
+    typeof r.configVersion !== "string" ||
+    typeof r.appliedAt !== "string" ||
+    !Array.isArray(r.warnings) ||
+    !r.warnings.every((w) => typeof w === "string")
+  ) {
+    return { ok: false, error: "Accusé de réception Desktop invalide." };
+  }
+  return {
+    ok: true,
+    ack: {
+      ok: true,
+      configVersion: r.configVersion,
+      appliedAt: r.appliedAt,
+      warnings: r.warnings as string[],
+    },
+  };
+}
+
+/**
+ * Envoie la configuration complete (sans secret, D1) au Desktop :
+ * `POST /api/device-config` (contrat v1, POC.md Phase B).
+ *
+ * Reponse 200 : accuse `{ok, configVersion, appliedAt, warnings}` valide
+ * sans confiance. Non-2xx ou `ok !== true` : erreur contractuelle
+ * `{ok:false, code, message}` exploitee si presente, sinon message generique.
+ *
+ * @param config configuration validee en amont (`validateDeviceConfig`).
+ * @param timeoutMs delai max avant `timeout` (4000 ms par defaut).
+ */
+export async function sendDeviceConfig(
+  host: string,
+  port: number,
+  config: DeviceConfig,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<DeviceConfigSendResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/device-config`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      }
+    );
+    const body: unknown = await response.json().catch(() => null);
+    if (response.ok && body !== null) {
+      const parsed = parseDeviceConfigAck(body);
+      if (parsed.ok) return parsed.ack;
+      return { ok: false, error: parsed.error };
+    }
+    // Erreur contractuelle attendue : {ok:false, code, message}.
+    const r = body as Record<string, unknown> | null;
+    if (
+      r !== null &&
+      r.ok === false &&
+      typeof r.code === "string" &&
+      typeof r.message === "string"
+    ) {
+      return { ok: false, error: `${r.code} : ${redactText(r.message)}` };
+    }
+    return { ok: false, error: `HTTP ${response.status} pendant l'envoi.` };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Valide le corps JSON de `GET /api/poc/vrms` (routes POC) sans lui faire
+ * confiance : `ok !== true` ou des entrees non conformes sont des erreurs de
+ * payload ; champs inconnus ignores, `builtin` optionnel.
+ *
+ * @param value corps, typiquement `await response.json()`.
+ */
+export function parseVrmList(value: unknown): VrmListResult {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse Desktop non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (r.ok !== true || !Array.isArray(r.vrms)) {
+    return { ok: false, error: "Liste VRM Desktop invalide." };
+  }
+  const vrms: VrmSummary[] = [];
+  for (const entry of r.vrms) {
+    if (typeof entry !== "object" || entry === null) {
+      return { ok: false, error: "Liste VRM Desktop invalide." };
+    }
+    const e = entry as Record<string, unknown>;
+    if (
+      typeof e.id !== "string" ||
+      e.id.length === 0 ||
+      typeof e.fileName !== "string" ||
+      e.fileName.length === 0 ||
+      typeof e.sizeBytes !== "number" ||
+      !Number.isFinite(e.sizeBytes)
+    ) {
+      return { ok: false, error: "Liste VRM Desktop invalide." };
+    }
+    vrms.push({
+      id: e.id,
+      fileName: e.fileName,
+      sizeBytes: e.sizeBytes,
+      ...(e.builtin === true ? { builtin: true } : {}),
+    });
+  }
+  return { ok: true, vrms };
+}
+
+/**
+ * Recupere les metadonnees des VRM disponibles sur le Desktop :
+ * `GET /api/poc/vrms` (routes POC, Phase C). Jamais le binaire (D2).
+ *
+ * @param host IPv4 du Desktop.
+ * @param port port HTTP du Desktop.
+ * @param timeoutMs delai max avant timeout (4000 ms par defaut).
+ */
+export async function fetchVrmList(
+  host: string,
+  port: number,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<VrmListResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${buildDesktopUrl(host, port)}/api/poc/vrms`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status} sur la liste VRM.` };
+    }
+    const parsed = parseVrmList(await response.json());
+    return parsed.ok ? parsed : { ok: false, error: parsed.error };
   } catch (error) {
     return {
       ok: false,
