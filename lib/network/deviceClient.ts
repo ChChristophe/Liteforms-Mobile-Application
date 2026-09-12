@@ -469,7 +469,7 @@ export async function fetchVrmList(
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${buildDesktopUrl(host, port)}/api/poc/vrms`, {
+    const response = await fetch(`${buildDesktopUrl(host, port)}/api/device/vrms`, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });

@@ -261,7 +261,7 @@ describe("fetchVrmList", () => {
     vi.unstubAllGlobals();
   });
 
-  it("recupere et parse la liste sur /api/poc/vrms", async () => {
+  it("recupere et parse la liste sur /api/device/vrms", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -290,7 +290,7 @@ describe("fetchVrmList", () => {
       ]);
     }
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe(
-      "http://192.168.1.42:43178/api/poc/vrms"
+      "http://192.168.1.42:43178/api/device/vrms"
     );
   });
 
