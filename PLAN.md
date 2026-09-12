@@ -236,8 +236,8 @@ implementation a restaurer ni une implementation de production.
 
 ### 2.5 Utilisation de la preuve POC
 
-Le POC a montre que le rendu VRM natif est possible, mais les hacks qu'il
-utilisait ne sont pas automatiquement approuves pour la suite. Un agent peut
+Le POC a montré que le rendu VRM natif est possible, mais les hacks qu'il
+utilisait ne sont pas automatiquement approuvés pour la suite. Un agent peut
 repartir d'un shell propre et choisir une implementation differente, a
 condition de conserver les gates suivantes :
 
@@ -246,6 +246,40 @@ condition de conserver les gates suivantes :
 3. verifier l'animation VRMA ou une alternative justifiee ;
 4. verifier le cycle de vie, le disposal et le changement de modele ;
 5. documenter toute difference avec la preuve POC.
+
+### 2.6 Preuve LAN POC Mobile -> Electron (validee terrain, 12/09/2026)
+
+Le POC d'integration LAN (contracte dans `C:\dev\protocol\DEVICE_API.md`,
+cote Electron : `POC.md` du repo Electron) a ete **valide sur le terrain**
+avec cette application Android :
+
+* connexion manuelle Desktop (IP + port 43178, `GET /api/health`) : OK —
+  « Connecté : Liteforms Desktop » ;
+* envoi de la configuration complete depuis l'ecran review
+  (`POST /api/device-config`) : accuse `{ok, configVersion, appliedAt,
+  warnings}` recu ; application a chaud confirmee cote Electron ;
+* warnings mood/pose remontes et affiches comme prevu ;
+* lecture de la bibliotheque VRM reelle du Desktop
+  (`GET /api/poc/vrms`) dans l'ecran vrm-select : selection de plusieurs
+  VRM reels (LeafBoy, Orion, JokerDude) appliques sur le Looking Glass ;
+* ecran VRM non scrollable et bouton d'envoi non reactif : deux bugs
+  trouver/corriger pendant la campagne (voir 2.7).
+
+Le flux de configuration de bout en bout fonctionne donc : le chemin
+critique « Mobile pilote, Desktop applique » est prouve.
+
+### 2.7 Enseignements pour la suite du portage
+
+1. `registerDesktop` doit mettre host/port dans le store en memoire (pas
+   seulement en persistance) — bug affichage corrige le 12/09.
+2. Tout handler async d'UI doit avoir try/finally pour liberer son etat
+   `sending`/`checking` (bouton non reactif corrige le 12/09).
+3. Les listes dynamiques (bibliotheque VRM) doivent utiliser le motif
+   `ScrollView` standard des ecrans setup, pas un `View` statique.
+4. La validation sans confiance des reponses Desktop (`parseDeviceConfigAck`,
+   `parseVrmList`) est le pattern a generaliser a tout nouveau endpoint.
+5. La saisie manuelle IP/port reste la reference tant que le provisioning
+   WiFi et mDNS ne sont pas implémentes cote Electron.
 
 ---
 
@@ -408,6 +442,25 @@ La decision par defaut ci-dessus est ajustee par l'utilisateur :
   pressent pas ;
 - l'ecran `vrm-select.tsx` decrit cet etat et la cible ; la verification de
   la reference au moment de l'envoi reste valide.
+
+#### Statut D2 — 12/09/2026 : bibliotheque Desktop eprouvee (POC Phase C)
+
+La partie « lecture du catalogue du Desktop » est desormais prouvee sur le
+terrain :
+
+* `GET /api/poc/vrms` liste la bibliotheque locale
+  `<userData>/vrm-library/` + le builtin (metadata uniquement) ;
+* `vrm-select.tsx` affiche cette liste reelle (nom, taille, tag builtin) et
+  la selection met a jour `modelRef {id, fileName, hash: null}` —
+  conformement a la decision D2 initiale (le Mobile ne reference que
+  l'identifiant, jamais le binaire) ;
+* le swap a chaud cote Desktop (Looking Glass inclus) est valide avec
+  plusieurs VRM reels ;
+* a NOTER pour l'architecture finale : la decision produit du Desktop
+  (bibliothèque locale, cf. `POC.md` §13.4) est que le futur catalogue en
+  ligne alimentera le dossier `vrm-library/` — le contrat `modelRef` reste
+  inchangé ; le telechargement Desktop -> Mobile pour le preview reste la
+  cible non modifiee de la presente decision D2.
 
 ### D3 — Connexion initiale
 
@@ -1217,6 +1270,15 @@ Cette fonctionnalite est secondaire. Si elle est demandee :
   workflow assets de Phase 4 (buffer invalide => erreur affichee, pas de
   crash) — verifiee unitairement, non sur VRM utilisateur (aucun picker).
 
+#### Statut Phase 5 — 12/09/2026 : affichage catalogue Desktop fait (POC Phase C)
+
+`vrm-select.tsx` affiche desormais la vraie bibliotheque du Desktop
+(`GET /api/poc/vrms` : bibliotheque locale + builtin, metadata uniquement) ;
+la selection met a jour `modelRef {id, fileName, hash: null}` et le Desktop
+applique le modele a chaud — valide sur le terrain (cf. statut D2 du
+12/09 et statut Phase 6 du 12/09). Reste de la phase : telechargement
+Desktop -> Mobile pour le preview natif (cible D2 inchangee).
+
 ---
 
 ### Phase 6 — Client de connexion Electron
@@ -1309,8 +1371,34 @@ Premier slice adapte au flux hotspot Electron (44 tests verts) :
   test de connexion, envoi du provisioning, statut et oubli des coordonnees ;
 - `docs/contract/` : README et exemples JSON transmis a l'agent Electron.
 
-Reste Phase 6 : `POST /api/device-config` avec config complete +
-ack/warnings. La v1 considere le LAN local de confiance ; aucun pairage
+#### Statut Phase 6 — 12/09/2026 : NOYAU VALIDE TERRAIN (POC LAN)
+
+Le reste « POST /api/device-config » est fait et eprouve sur le terrain avec
+l'app Electron packagée (bilan complet : `C:\dev\liteforms-electron\POC.md`
+§13) :
+
+- `lib/network/deviceClient.ts` : `sendDeviceConfig` (POST JSON contractuel,
+  timeout, parsing sans confiance de l'ack `{ok, configVersion, appliedAt,
+  warnings}`, erreurs contractuelles `code`/`message` redigees) et
+  `fetchVrmList` (`GET /api/poc/vrms`, parsing sans confiance) ;
+- `types/device.ts` : `DeviceConfigAck`, `DeviceConfigSendResult`,
+  `VrmSummary`, `VrmListResult` ;
+- `stores/connectionStore.ts` : `sendConfig` (coordonees du store, erreur
+  propre si non connecte) ; fix : `registerDesktop` met host/port dans le
+  store en memoire (bug d'affichage corrige) ;
+- `app/(setup)/review.tsx` : bouton « Envoyer au Desktop » branche (ack avec
+  appliedAt + warnings affiches ; erreurs contractuelles/reseau affichees ;
+  try/finally — bug de bouton bloque corrige) ;
+- `app/(setup)/vrm-select.tsx` : bibliotheque VRM reelle du Desktop listee
+  (taille, tag builtin, selection -> `updateAvatar modelRef`), fallback
+  saisie manuelle si Desktop absent/injoignable ; fix scroll (ScrollView
+  standard) ;
+- validation terrain : connexion OK, envoi complet OK, application a chaud
+  confirmee cote Electron (Looking Glass inclus), warnings mood/pose remontes,
+  selection de plusieurs VRM reels appliques.
+
+Reste Phase 6 : provisioning WiFi cote Electron (hotspot), reconnexion
+automatique. La v1 considere le LAN local de confiance ; aucun pairage
 visible ou token n'est requis.
 
 ---
