@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConfigStore } from '../../stores/configStore';
+import { useOnboardingStore } from '../../stores/onboardingStore';
 
 /** Entree du menu de configuration. */
 type MenuEntry = {
@@ -33,6 +35,17 @@ type MenuEntry = {
  */
 export default function SetupIndexScreen() {
   const router = useRouter();
+  const phase = useOnboardingStore((s) => s.phase);
+
+  // Decision produit (dec. 13/09/2026) : le PREMIER ecran de la app est
+  // l'appairage, pas ce menu. Tant que l'onboarding n'est pas termine
+  // (phase !== 'connected'), ce menu redirige vers /connect — y compris
+  // pendant la course au montage (phase `idle` pendant `startDiscovery` :
+  // l'ecran /connect affiche « Recherche… » puis le resultat). Une fois
+  // connecte, pas de redirection : le « Continuer » de /connect mene ici.
+  useEffect(() => {
+    if (phase !== 'connected') router.replace('/connect');
+  }, [phase, router]);
   const characterName = useConfigStore((state) => state.config.character.name);
   const alcoveColor = useConfigStore((state) => state.config.environment.alcoveColor);
   const modelFileName = useConfigStore((state) => state.config.avatar.modelRef.fileName);

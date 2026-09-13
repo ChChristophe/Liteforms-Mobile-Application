@@ -32,6 +32,10 @@ export default function ConnectScreen() {
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const switchingRef = useRef(false);
+  // Boucle « switching » : nombre de scans LAN infructueux consecutifs.
+  // Sert uniquement a afficher une aide (pas une erreur) apres ~4 echecs,
+  // car l'appliance peut mettre du temps a rejoindre le WiFi cible.
+  const [scanFailures, setScanFailures] = useState(0);
 
   // Lancement/reprise : recherche automatique a l'entree de l'ecran.
   useEffect(() => {
@@ -40,9 +44,12 @@ export default function ConnectScreen() {
 
   // ECRAN 3 : boucle polling statut (hotspot) + scan LAN (deviceId) tant
   // que la phase est `switching`. Arretee a la sortie (ref + phase guard).
+  // Le compteur d'echecs de scan repart de zero a chaque entree en
+  // `switching` (chaque SUMbitWifi / relance).
   useEffect(() => {
     if (phase !== 'switching') return;
     switchingRef.current = false;
+    setScanFailures(0);
     let cancelled = false;
     const poll = useOnboardingStore.getState;
 
@@ -57,7 +64,10 @@ export default function ConnectScreen() {
         if (emitting || joinOk) {
           // Hotspot mort (bascule reussie probable) ou `joined` :
           // lancer le scan de re-match deviceId sans attendre.
-          await poll().searchAfterSwitch();
+          const result = await poll().searchAfterSwitch();
+          if (!cancelled && result !== null && !result.found) {
+            setScanFailures((n) => n + 1);
+          }
         }
       } finally {
         switchingRef.current = false;
@@ -142,6 +152,13 @@ export default function ConnectScreen() {
             recherchons automatiquement l'appliance — surtout, ne fermez
             pas cette page.
           </Text>
+          {phase === 'switching' && scanFailures >= 4 && (
+            <Text style={styles.scanHelp}>
+              Toujours introuvable — vérifiez que le téléphone est bien
+              connecté au même réseau WiFi que l'appliance, puis patientez
+              quelques secondes.
+            </Text>
+          )}
           <Pressable
             style={styles.secondaryButton}
             accessibilityRole="button"
@@ -276,6 +293,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   hint: { fontSize: 13, lineHeight: 18, color: '#9ca3af', marginBottom: 8 },
+  scanHelp: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#374151',
+    marginTop: 4,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#f3f4f6',
+  },
   error: { fontSize: 13, color: '#dc2626', marginBottom: 8, marginTop: 8 },
   activity: { marginBottom: 12 },
   button: {
