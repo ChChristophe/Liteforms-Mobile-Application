@@ -217,9 +217,9 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
     }
     if (hasProvisioningStatus(status) && status.status.phase === "failed") {
       set({
-        phase: "failed",
-        lastError:
-          "L'appliance n'a pas rejoint le WiFi cible. Redémarrez-la en mode provisioning.",
+          phase: "failed",
+          lastError:
+            "L'appliance n'a pas rejoint le WiFi cible. Sur un poste Windows, vérifiez que la localisation est activée dans les réglages Windows (requis par le WiFi), puis relancez l'appairage.",
       });
     }
     return status;
