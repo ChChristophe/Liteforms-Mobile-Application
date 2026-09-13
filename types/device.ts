@@ -36,6 +36,12 @@ export type DesktopHealthResponse = {
   configVersions?: string[];
   /** Reseau utilise par Electron apres le provisioning. */
   networkMode?: "ethernet" | "wifi" | "provisioning";
+  /**
+   * Identifiant persistant de l'appliance (protocole 13/09/2026, champ
+   * additif). `undefined` pour un serveur v1 anterieur : le Mobile traite
+   * son absence comme « appliance non identifiable » (pas de match strict).
+   */
+  deviceId?: string;
 };
 
 /** Reponse de `GET /api/provisioning/health` sur le hotspot Electron. */
@@ -67,6 +73,22 @@ export type WifiProvisioningRequest = {
   security: "OPEN" | "WPA2-PSK" | "WPA3-SAE" | "WPA2-WPA3";
 };
 
+/**
+ * Reponse de `GET /api/provisioning/status` (protocole 13/09/2026) :
+ * issue de la transition reseau apres un `POST /api/provisioning/wifi`
+ * accepte. Servie par le hotspot (port de provisioning) ; la route devient
+ * injoignable apres la bascule — « injoignable » est un cas NORMAL
+ * (probable `joined`), pas une erreur payload.
+ */
+export type ProvisioningStatusResponse = {
+  /** `true` : reponse conforme du serveur de provisioning. */
+  ok: true;
+  /** Transition reseau de l'appliance. */
+  phase: "joining" | "joined" | "failed";
+  /** Identifiant persistant de l'appliance (re-match apres bascule). */
+  deviceId?: string;
+};
+
 /** Reponse de `POST /api/provisioning/wifi`. */
 export type WifiProvisioningResponse = {
   /** `true` si Electron a accepte les informations avant redemarrage reseau. */
@@ -87,6 +109,8 @@ export type DesktopHealthCheck =
   | {
       ok: true;
       desktopName: string;
+      /** Identifiant appliance, si le serveur l'expose (13/09/2026). */
+      deviceId?: string;
       protocolVersionMatches: boolean;
       configVersionSupported: boolean;
     }

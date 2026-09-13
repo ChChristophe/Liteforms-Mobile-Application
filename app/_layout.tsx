@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useConfigStore } from '../stores/configStore';
+import { useOnboardingStore } from '../stores/onboardingStore';
 
 /**
  * Layout racine de la navigation native.
@@ -14,6 +15,9 @@ import { useConfigStore } from '../stores/configStore';
  * - fournit le `SafeAreaProvider` utilise par tous les ecrans ;
  * - declenche UNE fois l'hydratation du store de configuration depuis
  *   AsyncStorage, avant que les ecrans n'affichent des valeurs finales ;
+ * - declenche UNE fois la reconnexion automatique de l'onboarding « zéro IP »
+ *   (dec. 13/09/2026) : health check des coordonnees connues puis scan
+ *   du /24 — non bloquant, le resultat vit dans `onboardingStore` ;
  * - monte la pile racine et expose uniquement le groupe `(setup)`.
  *
  * Le groupe `(main)` sera ajoute en Phase 1 lorsque le setup sera navigable
@@ -27,6 +31,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     void hydrate();
+    // Reconnexion auto : une seule fois au lancement, jamais pendant
+    // un flow en cours (guard de `startDiscovery`).
+    if (useOnboardingStore.getState().phase === 'idle') {
+      void useOnboardingStore.getState().startDiscovery();
+    }
   }, [hydrate]);
 
   return (

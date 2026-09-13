@@ -1401,6 +1401,47 @@ Reste Phase 6 : provisioning WiFi cote Electron (hotspot), reconnexion
 automatique. La v1 considere le LAN local de confiance ; aucun pairage
 visible ou token n'est requis.
 
+#### Statut Phase 6 — 13/09/2026 : onboarding « zero IP » implemente (cote Mobile)
+
+Flow unique premier lancement / perte de connexion (dec. 13/09, spec
+`protocol/DEVICE_API.md` mise a jour : `deviceId` persistant +
+`GET /api/provisioning/status`) :
+
+- `lib/network/discovery.ts` : `discoverDesktop(localIp, options)` — scan
+  x.x.x.1..254 (concurrence 30, timeout 300 ms/hote, fetch injectable),
+  match strict sur `deviceId` connu sinon premiere appliance saine hors
+  provisioning ; `getLocalIpAddress()` via `expo-network` (getIpAddressAsync,
+  SDK 57, installe — app APK/iOS standard comme Expo Go) ;
+- `deviceClient.ts` : `deviceId` additif dans `parseDesktopHealth` (expose),
+  `parseProvisioningStatus` + `fetchProvisioningStatus` (timeout/perte de
+  reseau = `reachable:false`, cas normal — le hotspot meurt apres un 202
+  accepte ; distinct d'un payload invalide) ;
+- `stores/onboardingStore.ts` : etats `discovering -> needHotspot ->
+  wifiForm -> sending -> switching -> connected | failed` ; persiste le
+  minimum via `connectionStorage` etendu (host/port/deviceId), le mot de
+  passe WiFi n'entre jamais dedans ; reconnexion auto au lancement
+  (coordonnees connues -> health, sinon scan deviceId strict, sinon
+  needHotspot) ; echec fetch du POST wifi apres 202 = transition normale,
+  jamais affichee comme erreur ;
+- ecrans : `app/(setup)/connect.tsx` (ecran a etapes, boucle polling
+  provisioning/status + scan post-bascule, bouton reglages WiFi via
+  `Linking.openSettings()`) ; `desktop.tsx` devenu statut simple ;
+  ancienne saisie IP/port deplacee dans `app/(setup)/advanced-connection.tsx`
+  (dev/debug) avec « Tester », provision manuel (coordonnees explicites —
+  fix lit desormais les champs saisis, plus `get().host/port`) et
+  « Relancer l'appairage » (`reset` onboarding) ;
+- mode provisioning accepte pendant la decouverte sur hotspot (`/api/
+  provisioning/health`, port 8080) ; erreur « encore en mode provisioning »
+  demeure mais est un etat attendu du flow, plus un blocage.
+
+Validation : 7 suites vitests vertes (85 tests, dont `discovery.test.ts`
+(scan pure fetch injecte) et `onboardingStore.test.ts` (transitions,
+echec non-fatal post-202, reset)) ; `tsc --noEmit` vert ; routes natif
+regenerees (`.expo/types`). Reste a valider terrain : cycle complet
+hotspot réel (bascule Windows), scan iOS (adresse sur interface correcte),
+debordement ~10 s du scan /24 sur register Cellular (cartes SIM actives :
+le Cellular renseigne une IP — validation du /24 faux a couvrir).
+
 ---
 
 ### Phase 7 — Synchronisation live et reconnexion

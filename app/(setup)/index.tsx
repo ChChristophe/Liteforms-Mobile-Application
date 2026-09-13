@@ -16,8 +16,9 @@ type MenuEntry = {
     | '/providers'
     | '/vrm-select'
      | '/review'
-     | '/avatar-preview'
-     | '/desktop';
+      | '/avatar-preview'
+      | '/desktop'
+      | '/connect';
 };
 
 /**
@@ -71,8 +72,13 @@ export default function SetupIndexScreen() {
     },
     {
       title: 'Desktop',
-      subtitle: 'Connecter votre poste Desktop Liteforms (LAN)',
+      subtitle: 'Statut la connexion et re-reconnexion de l\'appliance',
       href: '/desktop',
+    },
+    {
+      title: 'Connexion',
+      subtitle: 'Appairage « zéro IP » automatique (WiFi ou hotspot)',
+      href: '/connect',
     },
   ];
 

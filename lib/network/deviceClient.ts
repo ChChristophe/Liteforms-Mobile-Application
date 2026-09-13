@@ -8,6 +8,7 @@ import type {
   DeviceConfigAck,
   DeviceConfigSendResult,
   ProvisioningHealthResponse,
+  ProvisioningStatusResponse,
   VrmListResult,
   VrmSummary,
   WifiProvisioningRequest,
@@ -106,6 +107,7 @@ export function parseDesktopHealth(value: unknown):
   const configVersions = Array.isArray(r.configVersions)
     ? (r.configVersions.filter((v) => typeof v === "string") as string[])
     : undefined;
+  const deviceId = typeof r.deviceId === "string" && r.deviceId.length > 0 ? r.deviceId : undefined;
   return {
     ok: true,
     health: {
@@ -118,6 +120,7 @@ export function parseDesktopHealth(value: unknown):
       r.networkMode === "provisioning"
         ? { networkMode: r.networkMode }
         : {}),
+      ...(deviceId !== undefined ? { deviceId } : {}),
     },
   };
 }
@@ -219,6 +222,7 @@ export async function fetchDesktopHealth(
   return {
     ok: true,
     desktopName: health.name,
+    ...(health.deviceId !== undefined ? { deviceId: health.deviceId } : {}),
     protocolVersionMatches: health.protocolVersion === DESKTOP_PROTOCOL_VERSION,
     configVersionSupported:
       health.configVersions === undefined
@@ -262,6 +266,107 @@ export async function fetchProvisioningHealth(
       ok: false,
       error: redactText(describeNetworkFailure(error, timeoutMs)),
     };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Valide le corps JSON de `GET /api/provisioning/status` (protocole, section
+ * 13/09/2026) sans lui faire confiance : `ok !== true` ou `phase` hors
+ * union sont des erreurs de payload ; `deviceId` optionnel/additif.
+ */
+export function parseProvisioningStatus(
+  value: unknown
+): { ok: true; status: ProvisioningStatusResponse } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse de provisioning non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (
+    r.ok !== true ||
+    (r.phase !== "joining" && r.phase !== "joined" && r.phase !== "failed")
+  ) {
+    return { ok: false, error: "Réponse de provisioning/status invalide." };
+  }
+  const deviceId =
+    typeof r.deviceId === "string" && r.deviceId.length > 0 ? r.deviceId : undefined;
+  return {
+    ok: true,
+    status: {
+      ok: true,
+      phase: r.phase,
+      ...(deviceId !== undefined ? { deviceId } : {}),
+    },
+  };
+}
+
+/** Resultat de `fetchProvisioningStatus`. */
+export type ProvisioningStatusResult =
+  | { reachable: true; status: ProvisioningStatusResponse }
+  /** Hotspot injoignable : cas NORMAL (transition reussie probable). */
+  | { reachable: false }
+  /** Joignable mais payload invalide : refuse sans confiance. */
+  | { reachable: true; invalid: true; error: string };
+
+/** Garde : le resultat porte un statut conforme (non `invalid`). */
+export function hasProvisioningStatus(
+  result: ProvisioningStatusResult
+): result is Extract<ProvisioningStatusResult, { reachable: true; status: ProvisioningStatusResponse }> {
+  return result.reachable && "status" in result;
+}
+
+/**
+ * Interroge le serveur de provisioning sur l'issue de la transition WiFi :
+ * `GET /api/provisioning/status` (protocole 13/09/2026), APRES un
+ * `POST /api/provisioning/wifi` accepte. Timeout court adapte au polling.
+ *
+ * La perte de reseau (hotspot en train de mourir) est distinguee d'un
+ * payload invalide : `reachable: false` est un etat attendu, jamais une
+ * erreur affichable.
+ *
+ * @param host IPv4 du hotspot (souvent `192.168.4.1`).
+ * @param port port du service de provisioning.
+ * @param timeoutMs delai max (2000 ms par defaut : polling).
+ */
+export async function fetchProvisioningStatus(
+  host: string,
+  port: number,
+  timeoutMs: number = 2000
+): Promise<ProvisioningStatusResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) {
+    return { reachable: true, invalid: true, error: coordinates.errors.join(" ") };
+  }
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/provisioning/status`,
+      { signal: controller.signal, headers: { Accept: "application/json" } }
+    );
+    if (!response.ok) {
+      return {
+        reachable: true,
+        invalid: true,
+        error: `HTTP ${response.status} sur provisioning/status.`,
+      };
+    }
+    let raw: unknown = null;
+    try {
+      raw = await response.json();
+    } catch {
+      raw = null;
+    }
+    const parsed = parseProvisioningStatus(raw);
+    if (!parsed.ok) {
+      return { reachable: true, invalid: true, error: parsed.error };
+    }
+    return { reachable: true, status: parsed.status };
+  } catch {
+    // Timeout ou refus de connexion : le hotspot disparait de lui-meme
+    // lorsque la transition reussit — comportement observe terrain.
+    return { reachable: false };
   } finally {
     clearTimeout(abortTimer);
   }

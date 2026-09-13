@@ -17,10 +17,12 @@ import type {
 import type { DeviceConfig } from "../types/config";
 
 /**
- * Etat de connexion au Desktop (PLAN.md Phase 6, premier flux D3).
+ * Etat de connexion au Desktop (PLAN.md Phase 6 + onboarding « zéro IP »,
+ * protocole 13/09/2026).
  *
  * Separation des donnees (PLAN.md 3.3) :
- * - host/port : coordonnees ordinaires (reseau local, non secret) => AsyncStorage ;
+ * - host/port/deviceId/name : coordonnees ordinaires (reseau local non
+ *   secret) => AsyncStorage ;
  * - mot de passe WiFi de provisioning : transitoire, jamais dans ce store ni
  *   dans AsyncStorage ;
  * - statut de connexion : volatile, alimente par le client reseau.
@@ -30,6 +32,11 @@ export type ConnectionStore = {
   host: string | null;
   /** Port HTTP du Desktop, ou `null`. */
   port: number | null;
+  /**
+   * Identifiant persistant de l'appliance apprise (protocole 13/09/2026),
+   * ou `null` pour une session anterieure.
+   */
+  deviceId: string | null;
   /** `true` seulement apres un health check reussi (Desktop joignable). */
   connectedDesktop: string | null;
   /** `true` a l'init et pendant un health check en cours. */
@@ -42,18 +49,30 @@ export type ConnectionStore = {
    */
   hydrate: () => Promise<void>;
   /**
-    * Enregistre les coordonnees, puis ping la sante.
+   * Enregistre les coordonnees, puis ping la sante.
    *
    * @param host IPv4 validee en amont (revalidee par le client).
    * @param port port validee en amont.
+   * @param deviceId identifiant appliance, optionnel (onboarding).
    * @returns le resultat du health check, pour affichage direct.
    */
-  registerDesktop: (host: string, port: number) => Promise<CheckResult>;
+  registerDesktop: (
+    host: string,
+    port: number,
+    deviceId?: string | null
+  ) => Promise<CheckResult>;
   /**
-   * Envoie les credentials WiFi au hotspot actuellement configure.
+   * Envoie les credentials WiFi au hotspot passe explicitement.
+   *
+   * Fix 13/09 : la signature exige host/port en parametres (anciennement lus
+   * dans le store, source d'envoi vers un hote errone pendant l'onboarding).
    * Le mot de passe reste dans l'appel et n'entre jamais dans le store.
    */
-  provisionWifi: (payload: WifiProvisioningRequest) => Promise<CheckResult>;
+  provisionWifi: (
+    host: string,
+    port: number,
+    payload: WifiProvisioningRequest
+  ) => Promise<CheckResult>;
   /**
    * Envoie la configuration complete au Desktop connecte (host/port connus).
    * La config ne porte aucun secret (D1).
@@ -74,23 +93,34 @@ type CheckResult = { ok: boolean; errors: string[] };
 export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   host: null,
   port: null,
+  deviceId: null,
   connectedDesktop: null,
   checking: false,
   lastError: null,
   hydrate: async () => {
     const info = await loadConnectionInfo();
-    set({ host: info?.host ?? null, port: info?.port ?? null });
+    set({
+      host: info?.host ?? null,
+      port: info?.port ?? null,
+      deviceId: info?.deviceId ?? null,
+      connectedDesktop: info?.name ?? null,
+    });
   },
 
-  registerDesktop: async (host, port) => {
+  registerDesktop: async (host, port, deviceId) => {
     if (get().checking) return { ok: false, errors: ["Connexion dejà en cours."] };
     set({ checking: true, lastError: null });
 
     try {
-      await saveConnectionInfo(host, port);
+      await saveConnectionInfo(host, port, deviceId != null ? { deviceId } : undefined);
       const check = await fetchDesktopHealth(host, port);
       if (check.ok) {
-        set({ host, port, connectedDesktop: check.desktopName });
+        set({
+          host,
+          port,
+          ...(check.deviceId !== undefined ? { deviceId: check.deviceId } : {}),
+          connectedDesktop: check.desktopName,
+        });
         return { ok: true, errors: [] };
       }
       set({ connectedDesktop: null, lastError: check.error });
@@ -114,11 +144,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
     return get().registerDesktop(host, port);
   },
 
-  provisionWifi: async (payload) => {
-    const { host, port } = get();
-    if (host === null || port === null) {
-      return { ok: false, errors: ["Aucun hotspot Electron configure."] };
-    }
+  provisionWifi: async (host, port, payload) => {
     set({ checking: true, lastError: null });
     try {
       const health = await fetchProvisioningHealth(host, port);
@@ -153,6 +179,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => ({
     set({
       host: null,
       port: null,
+      deviceId: null,
       connectedDesktop: null,
       lastError: null,
     });

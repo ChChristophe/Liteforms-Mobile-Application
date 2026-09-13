@@ -56,6 +56,17 @@ export default function SetupLayout() {
         name="desktop"
         options={{ headerShown: true, title: 'Desktop' }}
       />
+      <Stack.Screen
+        name="connect"
+        options={{ headerShown: true, title: 'Connexion' }}
+      />
+      <Stack.Screen
+        name="advanced-connection"
+        options={{
+          headerShown: true,
+          title: 'Connexion avancée',
+        }}
+      />
       <Stack.Screen name="avatar-validation" options={{ headerShown: true, title: 'Validation Phase 4' }} />
     </Stack>
   );

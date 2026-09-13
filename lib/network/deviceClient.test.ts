@@ -6,6 +6,8 @@ import {
   parseDesktopHealth,
   parseDeviceConfigAck,
   parseProvisioningHealth,
+  parseProvisioningStatus,
+  fetchProvisioningStatus,
   fetchVrmList,
   parseVrmList,
 } from "./deviceClient";
@@ -68,8 +70,7 @@ describe("parseDesktopHealth", () => {
     }
   });
 
-  it("parse le health du hotspot de provisioning", () => {
-    const result = parseProvisioningHealth({
+  it("parse le health du hotspot de provisioning", () => {    const result = parseProvisioningHealth({
       ok: true,
       mode: "provisioning",
       deviceId: "desktop-8f31",
@@ -325,5 +326,123 @@ describe("fetchVrmList", () => {
 
   it("retourne une erreur sur des coordonnees invalides", async () => {
     expect((await fetchVrmList("desktop.local", 43178)).ok).toBe(false);
+  });
+});
+
+describe("parseDesktopHealth + deviceId (13/09/2026)", () => {
+  it("expose le deviceId additif quand le serveur l'envoie", () => {
+    const result = parseDesktopHealth({
+      ok: true,
+      name: "Liteforms Desktop",
+      protocolVersion: "1.0",
+      deviceId: "desktop-8f31",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.health.deviceId).toBe("desktop-8f31");
+  });
+
+  it("reste valide sans deviceId (serveur v1 anterieur)", () => {
+    const result = parseDesktopHealth({
+      ok: true,
+      name: "Liteforms Desktop",
+      protocolVersion: "1.0",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.health.deviceId).toBeUndefined();
+  });
+
+  it("deviceId non-textuel est ignore, pas fatal", () => {
+    const result = parseDesktopHealth({
+      ok: true,
+      name: "Liteforms Desktop",
+      protocolVersion: "1.0",
+      deviceId: 42,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.health.deviceId).toBeUndefined();
+  });
+});
+
+describe("parseProvisioningStatus (13/09/2026)", () => {
+  it("parse joining/joined/failed", () => {
+    expect(parseProvisioningStatus({ ok: true, phase: "joining" }).ok).toBe(true);
+    const joined = parseProvisioningStatus({
+      ok: true,
+      phase: "joined",
+      deviceId: "desktop-8f31",
+    });
+    expect(joined.ok).toBe(true);
+    if (joined.ok) {
+      expect(joined.status.phase).toBe("joined");
+      expect(joined.status.deviceId).toBe("desktop-8f31");
+    }
+    expect(parseProvisioningStatus({ ok: true, phase: "failed" }).ok).toBe(true);
+  });
+
+  it("refuse ok=false ou phase hors union", () => {
+    expect(parseProvisioningStatus({ ok: false, phase: "joined" }).ok).toBe(false);
+    expect(parseProvisioningStatus({ ok: true, phase: "mystery" }).ok).toBe(false);
+    expect(parseProvisioningStatus(null).ok).toBe(false);
+  });
+});
+
+describe("fetchProvisioningStatus", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retourne le statut conforme", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ ok: true, phase: "joined", deviceId: "desktop-8f31" }),
+          { status: 200 }
+        )
+      )
+    );
+    const result = await fetchProvisioningStatus("192.168.4.1", 8080);
+    expect(result).toEqual({
+      reachable: true,
+      status: { ok: true, phase: "joined", deviceId: "desktop-8f31" },
+    });
+  });
+
+  it("hotspot mort = reachable:false, jamais une erreur affichee", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Network request failed");
+      })
+    );
+    const result = await fetchProvisioningStatus("192.168.4.1", 8080);
+    expect(result).toEqual({ reachable: false });
+  });
+
+  it("timeout = reachable:false (abort, meme status)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const error = new Error("Aborted");
+        error.name = "AbortError";
+        throw error;
+      })
+    );
+    const result = await fetchProvisioningStatus("192.168.4.1", 8080);
+    expect(result).toEqual({ reachable: false });
+  });
+
+  it("payload invalide = reachable avec invalid:true", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true, phase: 42 }), { status: 200 })
+      )
+    );
+    const result = await fetchProvisioningStatus("192.168.4.1", 8080);
+    expect(result.reachable).toBe(true);
+    if (result.reachable && "invalid" in result) {
+      expect(result.invalid).toBe(true);
+    }
   });
 });
