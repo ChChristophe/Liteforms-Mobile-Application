@@ -2,19 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   CAM_FILL_DISTANCE_FACTOR,
+  IMPORTED_HEIGHT_FILL,
+  IMPORTED_WIDTH_FILL,
   TARGET_VRM_HEIGHT,
+  computeFootprintScale,
   measureVrmBaseline,
-  normalizeVrmHeight,
   resetVrmCalibration,
   resolveVrmBaseline,
   type VrmBaseline,
 } from "./previewRuntime";
 
 /**
- * Protege l'invariant de cadrage 15/09 (v4) : tout VRM, quelle que soit sa
- * bbox d'origine (grand, petit, bras ecartes, pivot decale), est normalise
- * a la hauteur du lobster PUIS aligne sur son centre. La camera et l'alcove
- * ne lisent plus AUCUNE mesure du VRM affiche : zoom et calage constants.
+ * Protege l'invariant de cadrage 15/09 (v5) : reproduction du cadrage par
+ * empreinte du /hologram Desktop. Un VRM est mis a l'echelle UNIFORME pour
+ * tenir dans l'empreinte du lobster (inseree 0.9/0.82) — proportions natives
+ * preservees (large/plat reste plat, petit reste petit). Le lobster n'est
+ * JAMAIS rescale (reference). La camera et l'alcove ne dependent d'aucune
+ * mesure du modele affiche.
  */
 function makeHumanoid(height: number, armSpan?: number): THREE.Group {
   const group = new THREE.Group();
@@ -29,54 +33,48 @@ function makeHumanoid(height: number, armSpan?: number): THREE.Group {
   return group;
 }
 
-function bboxHeight(scene: THREE.Object3D): number {
-  return new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3()).y;
+function bboxSize(scene: THREE.Object3D): THREE.Vector3 {
+  return new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3());
 }
 
-describe("normalizeVrmHeight", () => {
-  it("normalise n'importe quelle hauteur d'origine a la cible", () => {
-    for (const original of [0.3, 1.0, 1.8, 5, 40]) {
-      const scene = makeHumanoid(original);
-      normalizeVrmHeight(scene, TARGET_VRM_HEIGHT);
-      expect(bboxHeight(scene)).toBeCloseTo(TARGET_VRM_HEIGHT, 5);
-    }
+describe("computeFootprintScale (cadrage par empreinte)", () => {
+  it("un modele deja dans l'empreinte est agrandi jusqu'a la toucher", () => {
+    // reference (lobster) 1.0 x 1.6 ; modele petit 0.5 x 0.5.
+    const scale = computeFootprintScale(0.5, 0.5, 1.0, 1.6);
+    // largeur : 0.9/0.5 = 1.8 ; hauteur : (1.6*0.82)/0.5 = 2.624 -> min 1.8
+    expect(scale).toBeCloseTo((1.0 * IMPORTED_WIDTH_FILL) / 0.5, 6);
   });
 
-  it("un VRM aux bras ecartes garde sa pleine hauteur (mesure sur Y, pas max axe)", () => {
-    const wide = makeHumanoid(1.6, 3.5); // bras >> hauteur
-    normalizeVrmHeight(wide, TARGET_VRM_HEIGHT);
-    expect(bboxHeight(wide)).toBeCloseTo(TARGET_VRM_HEIGHT, 5);
+  it("un modele large/plat est contraint par la LARGEUR (reste plat)", () => {
+    // lilshark-like : tres large, tres plat.
+    const scale = computeFootprintScale(2.5, 0.4, 1.0, 1.6);
+    expect(scale).toBeCloseTo((1.0 * IMPORTED_WIDTH_FILL) / 2.5, 6);
+    // La hauteur resultante est donc petite (proportions preservees).
+    expect(0.4 * scale).toBeLessThan(1.6 * IMPORTED_HEIGHT_FILL);
   });
 
-  it("est idempotent", () => {
-    const scene = makeHumanoid(1.8);
-    normalizeVrmHeight(scene, TARGET_VRM_HEIGHT);
-    const afterFirst = scene.scale.x;
-    normalizeVrmHeight(scene, TARGET_VRM_HEIGHT);
-    expect(scene.scale.x).toBeCloseTo(afterFirst, 6);
-    expect(bboxHeight(scene)).toBeCloseTo(TARGET_VRM_HEIGHT, 5);
+  it("un modele grand est reduit pour tenir dans l'empreinte", () => {
+    const scale = computeFootprintScale(4.0, 5.0, 1.0, 1.6);
+    expect(scale).toBeLessThan(1);
+    // contraint par la LARGEUR (ratio le plus petit : 0.9/4 < (1.6*0.82)/5).
+    expect(scale).toBeCloseTo((1.0 * IMPORTED_WIDTH_FILL) / 4.0, 6);
   });
 
-  it("edge : bbox vide, hauteur nulle ou cible <= 0 => no-op sans crash", () => {
-    const empty = new THREE.Group();
-    expect(() => normalizeVrmHeight(empty, TARGET_VRM_HEIGHT)).not.toThrow();
-    expect(empty.scale.x).toBe(1);
-
-    const flat = makeHumanoid(0.001);
-    flat.children[0].position.y = 0; // bbox plate
-    expect(() => normalizeVrmHeight(flat, 0)).not.toThrow();
-    expect(() => normalizeVrmHeight(flat, -1)).not.toThrow();
+  it("edge : dimensions nulles => scale 1 (pas de crash ni infini)", () => {
+    expect(computeFootprintScale(0, 0, 1.0, 1.6)).toBe(1);
+    expect(computeFootprintScale(0, 1.0, 1.0, 1.6)).toBe(1);
   });
 });
 
 describe("measureVrmBaseline (boite complete du lobster)", () => {
-  it("mesure hauteur, demi-max-dim, centre ET pieds (bras ecartes -> axe X)", async () => {
+  it("mesure hauteur, largeur, demi-max-dim, centre ET pieds", async () => {
     const scene = makeHumanoid(1.62, 3.0);
     const baseline = await measureVrmBaseline(
       new ArrayBuffer(8),
       async () => ({ scene, vrm: null })
     );
     expect(baseline?.height).toBeCloseTo(1.62, 5);
+    expect(baseline?.width).toBeCloseTo(3.0, 5);
     expect(baseline?.halfMaxDim).toBeCloseTo(1.5, 5);
     expect(baseline?.center.y).toBeCloseTo(0.81, 5);
     expect(baseline?.minY).toBeCloseTo(0, 5);
@@ -118,6 +116,7 @@ describe("resolveVrmBaseline (calibration cachee une fois par session)", () => {
 
   const lobsterBaseline = (height = 1.83, armSpan = 2.0): VrmBaseline => ({
     height,
+    width: armSpan,
     halfMaxDim: Math.max(height, armSpan) / 2,
     center: { x: 0, y: height / 2, z: 0 },
     minY: 0,
@@ -132,7 +131,6 @@ describe("resolveVrmBaseline (calibration cachee une fois par session)", () => {
     await expect(
       resolveVrmBaseline({ isBundledVrm: true, nativeBaseline: native })
     ).resolves.toEqual(native);
-    // Les residents suivants heritent de cette meme reference.
     await expect(
       resolveVrmBaseline({ isBundledVrm: false })
     ).resolves.toEqual(native);
@@ -161,7 +159,6 @@ describe("resolveVrmBaseline (calibration cachee une fois par session)", () => {
     });
     expect(result.height).toBe(TARGET_VRM_HEIGHT);
     expect(result.halfMaxDim).toBe(TARGET_VRM_HEIGHT / 2);
-    // Retentee au prochain appel (cache toujours vide).
     expect(
       (await resolveVrmBaseline({ isBundledVrm: false })).height
     ).toBe(TARGET_VRM_HEIGHT);
@@ -176,11 +173,9 @@ describe("resolveVrmBaseline (calibration cachee une fois par session)", () => {
     expect(result.height).toBe(TARGET_VRM_HEIGHT);
   });
 
-  it("la reference est INDEPENDANTE du VRM affiche (invariant v4)", async () => {
+  it("la reference est INDEPENDANTE du VRM affiche (invariant v5)", async () => {
     const native = lobsterBaseline(1.83, 2.0);
     await resolveVrmBaseline({ isBundledVrm: true, nativeBaseline: native });
-    // Un resident quelconque (bras ecartes, autre hauteur) : la baseline
-    // retournee reste celle du lobster — aucune mesure du resident.
     const resident = await resolveVrmBaseline({ isBundledVrm: false });
     expect(resident).toEqual(native);
   });

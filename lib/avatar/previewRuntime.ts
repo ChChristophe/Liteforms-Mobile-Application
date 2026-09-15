@@ -39,6 +39,14 @@ export const CAM_FILL_DISTANCE_FACTOR = 1.45;
 /** Calage vertical camera = hauteur lobster x ce facteur (au-dessus du centre). */
 export const CAM_PIVOT_OFFSET_Y_FACTOR = 0.05;
 
+// Cadrage par empreinte (reproduction du /hologram Desktop, `modelFraming.ts`
+// defaults) : le modele affiche est mis a l'echelle uniforme pour tenir dans
+// l'empreinte du lobster, inseree de ces facteurs. Les proportions natives
+// sont preservees (un modele large/plat reste plat, un petit reste petit) —
+// contrairement a une normalisation en hauteur qui ecrasait la morphologie.
+export const IMPORTED_WIDTH_FILL = 0.9;
+export const IMPORTED_HEIGHT_FILL = 0.82;
+
 /**
  * Runtime de preview VRM natif (PLAN.md Phase 4).
  *
@@ -124,23 +132,25 @@ export type PreviewHandle = {
 };
 
 /**
- * Normalise un VRM a `targetHeight` (unites monde) : un seul facteur de
- * scale applique sur la scene, mesure sur la HAUTEUR (bboxSize.y) — pas sur
- * le plus grand axe, sinon un VRM aux bras ecartes serait retreci en
- * hauteur. Mutation en place, idempotente (re-appliquer donne hauteur
- * cible), sans rechargement d'asset. Degenerescences (bbox vide, hauteur
- * nulle ou negative) : no-op securitaire, jamais de crash ni de scale
- * infini.
+ * Echelle uniforme du cadrage par empreinte (reproduction du /hologram
+ * Desktop, `computeModelFramingByFootprint`) : le plus petit ratio fait foi,
+ * si bien que le modele tient ENTIEREMENT dans le rectangle de reference
+ * (insere 0.9/0.82). Les proportions natives sont preservees : un modele
+ * large/plat reste plat (contraint en largeur), un petit reste petit.
  */
-export function normalizeVrmHeight(
-  scene: THREE.Object3D,
-  targetHeight: number
-): void {
-  if (!(targetHeight > 0)) return;
-  const box = new THREE.Box3().setFromObject(scene);
-  const size = box.getSize(new THREE.Vector3());
-  if (!(size.y > 0)) return;
-  scene.scale.multiplyScalar(targetHeight / size.y);
+export function computeFootprintScale(
+  nativeWidth: number,
+  nativeHeight: number,
+  referenceWidth: number,
+  referenceHeight: number
+): number {
+  const candidates = [
+    nativeWidth > 0 ? (referenceWidth * IMPORTED_WIDTH_FILL) / nativeWidth : 1,
+    nativeHeight > 0
+      ? (referenceHeight * IMPORTED_HEIGHT_FILL) / nativeHeight
+      : 1,
+  ];
+  return Math.min(...candidates);
 }
 
 function disposeSceneResources(scene: THREE.Object3D | null): void {
@@ -167,6 +177,8 @@ function disposeSceneResources(scene: THREE.Object3D | null): void {
 export type VrmBaseline = {
   /** Hauteur debout (bboxSize.y). */
   height: number;
+  /** Largeur native (bboxSize.x) — composante d'empreinte du cadrage. */
+  width: number;
   /** Demi-plus-grand-axe de la bbox (cadrage camera, bras inclus). */
   halfMaxDim: number;
   /** Centre de la bbox — cible camera ET alignement du modele affiche. */
@@ -178,6 +190,7 @@ export type VrmBaseline = {
 /** Fallback si la mesure du lobster echoue (buffer illisible). */
 const FALLBACK_BASELINE: VrmBaseline = {
   height: TARGET_VRM_HEIGHT,
+  width: TARGET_VRM_HEIGHT,
   halfMaxDim: TARGET_VRM_HEIGHT / 2,
   center: { x: 0, y: TARGET_VRM_HEIGHT / 2, z: 0 },
   minY: 0,
@@ -191,6 +204,7 @@ function sceneBaseline(scene: THREE.Object3D): VrmBaseline | null {
   const center = box.getCenter(new THREE.Vector3());
   return {
     height: size.y,
+    width: size.x,
     halfMaxDim: maxDim / 2,
     center: { x: center.x, y: center.y, z: center.z },
     minY: box.min.y,
@@ -370,9 +384,8 @@ export async function startPreviewRuntime(
             ? { isBundledVrm: true, nativeBaseline }
             : { isBundledVrm: false, bundledVrm: buffers.bundledVrm }
         );
-        // Le bundle lui-meme : scale = target/native = 1 (jamais rescale) ;
-        // un resident : porte a la hauteur du lobster.
-        normalizeVrmHeight(vrm.scene, baseline.height);
+        // Pas de normalisation en hauteur ici : l'echelle est decidee par le
+        // cadrage par empreinte (plus bas), qui preserve les proportions.
         resolve(vrm);
       } catch (error) {
         reject(error);
@@ -389,21 +402,37 @@ export async function startPreviewRuntime(
     lookAtProxy.name = "VRMLookAtQuaternionProxy";
     vrm.scene.add(lookAtProxy);
   }
-  // Cadrage (incidents 15/09 v1..v4) : TOUT est fige sur la baseline du
-  // lobster (boite mesuree une fois par session). Le VRM affiche est d'abord
-  // aligne sur la boite du lobster (centre confondu), puis la camera et
-  // l'alcove sont des constantes absolues. Plus AUCUNE mesure du modele
-  // affiche dans le cadrage : zoom et calage identiques pour tout VRM.
-  const bbox = new THREE.Box3().setFromObject(vrm.scene);
-  const bboxCenter = bbox.getCenter(new THREE.Vector3());
-  // Aligne le centre du modele sur le centre du lobster (fixe) : le
-  // pivot/les pieds decales d'un VRM ne modifient plus le cadrage.
-  vrm.scene.position.set(
-    baseline.center.x - bboxCenter.x,
-    baseline.center.y - bboxCenter.y,
-    baseline.center.z - bboxCenter.z
+  // Cadrage (incidents 15/09 v1..v5) : reproduction du cadrage par empreinte
+  // du /hologram Desktop. Le lobster est la reference (echelle native, camera
+  // fixe) ; tout autre VRM est mis a l'echelle UNIFORME pour tenir dans
+  // l'empreinte du lobster (inseree 0.9/0.82) — les proportions natives sont
+  // preservees, l'alcove suit la meme echelle/position. Camera fixe, aucune
+  // mesure du modele affiche dans la distance.
+  const nativeBox = new THREE.Box3().setFromObject(vrm.scene);
+  const nativeSize = nativeBox.getSize(new THREE.Vector3());
+  const nativeCenter = nativeBox.getCenter(new THREE.Vector3());
+
+  const isLobster = buffers.vrm === buffers.bundledVrm;
+  const scale = isLobster
+    ? 1
+    : computeFootprintScale(
+        nativeSize.x,
+        nativeSize.y,
+        baseline.width,
+        baseline.height
+      );
+  vrm.scene.scale.multiplyScalar(scale);
+
+  // Pieds du modele a la hauteur des pieds du lobster, centre X/Z aligne.
+  const finalSizeY = nativeSize.y * scale;
+  const desiredCenter = new THREE.Vector3(
+    baseline.center.x,
+    baseline.minY + finalSizeY / 2,
+    baseline.center.z
   );
-  const alignOffset = vrm.scene.position.clone();
+  const scaledCenter = nativeCenter.clone().multiplyScalar(scale);
+  const alignOffset = desiredCenter.clone().sub(scaledCenter);
+  vrm.scene.position.copy(alignOffset);
 
   const camCenter = new THREE.Vector3(
     baseline.center.x,
@@ -431,7 +460,7 @@ export async function startPreviewRuntime(
   let depth = 0;
   // Geste 4.5 : coins de la bbox de l'avatar, projetes a la demande (la zone
   // suit le zoom, contrairement a un cache fige au cadrage initial). La bbox
-  // est relevee APRES l'alignement (centre = baseline lobster).
+  // est relevee APRES l'echelle + le positionnement.
   const alignedBox = new THREE.Box3().setFromObject(vrm.scene);
   const bboxCorners: THREE.Vector3[] = [];
   for (const x of [alignedBox.min.x, alignedBox.max.x]) {
@@ -474,12 +503,12 @@ export async function startPreviewRuntime(
     alcoveLoader.parse(buffers.alcove, "", resolve, reject);
   });
   const alcoveScene = (alcoveGltf as { scene: THREE.Group }).scene;
-  // Positionnement relatif a l'avatar : centre sur la bbox de l'avatar
-  // (normalise a la hauteur du bundle, l'echelle de reference visuelle), a
-  // l'echelle native de l'alcove (les unites du .glb sont les leurs) — le
-  // ratio alcove/avatar est celui du cadrage d'origine du lobster, comme
-  // cote Web (`environmentLoader.ts` : "stable size benchmark").
-  alcoveScene.position.set(baseline.center.x, baseline.minY, baseline.center.z);
+  // L'alcove suit la MEME echelle/position que le modele cadre (comportement
+  // du /hologram Desktop : `environmentScale`/`environmentPosition` =
+  // `framing.finalScale`/`finalPosition`). Pour le lobster (scale 1, position
+  // 0) l'alcove reste a son echelle native — le ratio d'origine est preserve.
+  alcoveScene.scale.setScalar(scale);
+  alcoveScene.position.copy(alignOffset);
   scene.add(alcoveScene);
 
   /** Applique un zoom contraint et repositionne la camera (distance seule). */
