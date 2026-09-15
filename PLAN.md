@@ -1765,6 +1765,33 @@ pivotes proprement peuvent rester legerement decales en position, pas en
 zoom. Un VRM plus large que haut ferait varier fillDistance via
 maxDimension ; acceptable au POC (les VRM courants sont plus hauts que larges).
 
+### Decision produit 15/09 (v2) — ratio alcove/avatar calle sur le lobster
+
+Regression terrain apres la v1 : la normalisation systematique a 1.0 creait un
+faux ratio — l'alcove resta a ses unites natives pendant que l'avatar passait a
+1.0, d'ou un cadrage trop zoome (alcove et avatar partiellement coupes).
+
+* La hauteur cible de normalisation n'est plus `TARGET_VRM_HEIGHT = 1.0` mais la
+  HAUTEUR NATIVE MESUREE du bundle lobster (`lobsterEdit.vrm`), reference
+  visuelle du cadrage (alcove a ses unites natives + camera calcee sur SA bbox
+  = framing d'origine). La constante 1.0 devient un simple fallback (buffer
+  bundle illisible / bbox vide).
+* Le lobster affiche n'est JAMAIS rescale (target/natif = 1) : invariance du
+  cadrage mainWindow equivalente a l'etat d'avant 0f99e51.
+* Le buffer bundle est pre-charge au demarrage (`getBundledVrmBuffer`,
+  cache MODULE via Promise.all alcove+vrma) et reuse — un seul chargement par
+  session, reload runtime inclus, pas de double lecture quand le resident est
+  le bundle (deja exclu cote residentVrm).
+* La mesure n'a lieu qu'une fois par session (cache module `bundledVrmHeight`,
+  remesure si echec apres un reload runtime ; aucun setState par frame). Le
+  parse de mesure (resident affiche avant toute session bundle) est jetable et
+  dispose ses geometries : cout une fois, pas par frame.
+* Ordre preserve : `rotateVRM0` PUIS mesure/normalisation (hauteur stable sur Y).
+
+Limites : si le resident est affiche avant que le lobster ait jamais ete
+affiche, un parse supplementaire du bundle a lieu (une fois par session max).
+VRM 0.x extremes : inchanges (voir limites v1).
+
 ### Objectifs
 
 - ne pas bloquer l'UI pendant le chargement ;

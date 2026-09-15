@@ -35,7 +35,11 @@ import {
   loadResidentVrm,
   useResidentVrmVersion,
 } from '../../lib/storage/residentVrm';
-import { startPreviewRuntime, type PreviewHandle } from '../../lib/avatar/previewRuntime';
+import {
+  startPreviewRuntime,
+  getBundledVrmBuffer,
+  type PreviewHandle,
+} from '../../lib/avatar/previewRuntime';
 
 /** Etats UI du preview : statique, recycle l'ecran, jamais par frame. */
 type PreviewStatus =
@@ -216,7 +220,11 @@ export const AvatarPreview = memo(function AvatarPreview({
         // D2 : le résident (téléchargé Desktop -> Mobile) est préféré au
         // bundle quand il existe et est valide ; sinon fallback bundle,
         // avertissement visible si un résident était attendu (jamais crash).
-        const [resident, alcove, animation] = await Promise.all([
+        // Calibration 15/09 v2 : le buffer bundle lobster est PRE-CHARGE ici
+        // (cache module via getBundledVrmBuffer — un seul chargement par
+        // session d'app, reload runtime inclus) et sert de base a la mesure
+        // de la hauteur cible, donc au ratio alcove/avatar.
+        const [resident, alcove, animation, bundledVrm] = await Promise.all([
           loadResidentVrm(),
           loadBundledAssetBuffer(
             require('../../assets/models/Alcove.glb')
@@ -224,15 +232,17 @@ export const AvatarPreview = memo(function AvatarPreview({
           loadBundledAssetBuffer(
             require('../../assets/animations/idle_loop.vrma')
           ),
+          getBundledVrmBuffer(() =>
+            loadBundledAssetBuffer(
+              require('../../assets/models/lobsterEdit.vrm')
+            )
+          ),
         ]);
-        // Fallback bundle si le résident est absent : réservé au builtin
-        // (resident === bundle équivalent, donc pas un downgrade).
+        // Fallback bundle si le résident est absent : le buffer bundle est
+        // deja en memoire (cache module) — AUCUN second chargement. Resident
+        // de nom = bundle deja exclu en amont (residentVrm).
         const vrm =
-          resident.status === 'resident'
-            ? resident.buffer
-            : await loadBundledAssetBuffer(
-                require('../../assets/models/lobsterEdit.vrm')
-              );
+          resident.status === 'resident' ? resident.buffer : bundledVrm;
         if (resident.status === 'invalid') setNotice(resident.message);
         if (!isCurrent()) return;
         onStage?.('assets');
@@ -240,6 +250,7 @@ export const AvatarPreview = memo(function AvatarPreview({
           vrm,
           alcove,
           animation,
+          bundledVrm,
         });
         if (!isCurrent()) {
           runtime.dispose();

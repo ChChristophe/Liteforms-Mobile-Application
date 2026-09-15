@@ -19,15 +19,15 @@ import {
 import type { AvatarMood } from "../../types/config";
 
 /**
- * Hauteur standard de l'avatar en unites monde. Invariant de cadrage :
- * chaque VRM est normalise a cette hauteur AVANT le calcul de la bbox, donc
- * 1 unite monde = hauteur de l'avatar. La distance camera (fillDistance)
- * devient une constante identique pour tout VRM — le cadrage alcove+VRM
- * ne varie plus du simple au triple selon le modele telecharge.
+ * Fallback de hauteur cible (unites monde), utilisee UNIQUEMENT si la
+ * calibration sur le bundle lobster echoue (buffer illisible, bbox vide).
  *
- * La normalisation se fait sur la HAUTEUR debout (bboxSize.y), pas sur le
- * plus grand axe : un VRM aux bras ecartes aurait une bbox large et serait
- * retreci en hauteur. La hauteur est la mesure stable d'une silhouette.
+ * Regression 15/09 v2 : la constante 1.0 comme cible systematique desynchronisait
+ * l'alcove (unites natives de son .glb) de l'avatar. La cible reelle est la
+ * hauteur native mesuree du bundle lobster (`lobsterEdit.vrm`) — baseline
+ * visuel de cadrage : le lobster lui-meme n'est JAMAIS rescale (echelle 1),
+ * l'alcove garde ses unites, et tout VRM resident est porte a la hauteur du
+ * lobster. Le ratio d'origine est preserve et le cadrage reste constant.
  */
 export const TARGET_VRM_HEIGHT = 1.0;
 
@@ -155,20 +155,127 @@ function disposeSceneResources(scene: THREE.Object3D | null): void {
   });
 }
 
+/** Hauteur debout (bboxSize.y) d'une scene, null si bbox vide/platte. */
+function standingHeight(scene: THREE.Object3D): number | null {
+  const size = new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3());
+  return size.y > 0 ? size.y : null;
+}
+
+// --- Calibration de la hauteur cible (baseline = bundle lobster) ---------
+// Etat MODULE : le buffer bundle et sa hauteur mesuree vivent une fois par
+// session d'app (un reload runtime ne recharge ni ne remesure rien).
+
+let bundledVrmBufferPromise: Promise<ArrayBuffer> | null = null;
+let bundledVrmHeight: number | null = null;
+
+/** Resultat de parse pour la mesure (injectable en test). */
+type ParsedVrmScene = { scene: THREE.Object3D; vrm: VRM | null };
+
+async function parseVrmForMeasure(buffer: ArrayBuffer): Promise<ParsedVrmScene> {
+  const loader = new GLTFLoader();
+  loader.register((parser) => new VRMLoaderPlugin(parser));
+  const gltf = await new Promise<{
+    scene: THREE.Object3D;
+    userData: { vrm?: VRM };
+  }>((resolve, reject) => loader.parse(buffer, "", resolve, reject));
+  return { scene: gltf.scene, vrm: gltf.userData.vrm ?? null };
+}
+
+/**
+ * Mesure la hauteur debout d'un VRM depuis son buffer : parse jetable
+ * (geometrie disposee, aucun rendu), `rotateVRM0` avant la mesure (même
+ * ordre que le pipeline de preview, hauteur stable sur Y). Echec de parse
+ * ou bbox degeneresce -> null (l'appelant garde le fallback).
+ */
+export async function measureVrmStandingHeight(
+  buffer: ArrayBuffer,
+  parse: (buffer: ArrayBuffer) => Promise<ParsedVrmScene> = parseVrmForMeasure
+): Promise<number | null> {
+  let parsed: ParsedVrmScene;
+  try {
+    parsed = await parse(buffer);
+  } catch {
+    return null;
+  }
+  if (parsed.vrm) VRMUtils.rotateVRM0(parsed.vrm);
+  const height = standingHeight(parsed.scene);
+  disposeSceneResources(parsed.scene);
+  void (parsed.vrm as unknown as { dispose?: () => void } | null)?.dispose?.();
+  return height;
+}
+
+/**
+ * Resolve la hauteur cible de normalisation (cache module, une mesure par
+ * session, aucune mesure par frame) :
+ * - le bundle EST affiche : sa hauteur native (mesuree du vrm deja parse,
+ *   `nativeHeight`) devient la reference et est cachee — echelle 1, cadrage
+ *   d'origine preserve ;
+ * - un resident est affiche : cible = cache si present, sinon mesure
+ *   PARESSEUSE du buffer bundle (`bundledVrm`) ; echec -> null (cache non
+ *   pollue, la mesure est retentee au prochain reload runtime) ;
+ * - sinon fallback historique `TARGET_VRM_HEIGHT`.
+ */
+export async function resolveTargetVrmHeight(input: {
+  isBundledVrm: boolean;
+  /** Hauteur native du vrm affiche quand il EST le bundle (post-rotateVRM0). */
+  nativeHeight?: number | null;
+  /** Buffer bundle en cache, pour la mesure paresseuse si le cache est vide. */
+  bundledVrm?: ArrayBuffer;
+  parse?: (buffer: ArrayBuffer) => Promise<ParsedVrmScene>;
+}): Promise<number> {
+  if (input.isBundledVrm) {
+    if (input.nativeHeight != null) bundledVrmHeight = input.nativeHeight;
+  } else if (bundledVrmHeight === null && input.bundledVrm) {
+    const measured = await measureVrmStandingHeight(input.bundledVrm, input.parse);
+    if (measured !== null) bundledVrmHeight = measured;
+  }
+  return bundledVrmHeight ?? TARGET_VRM_HEIGHT;
+}
+
+/**
+ * Buffer du VRM bundle en cache module : UN SEUL chargement par session
+ * d'app (Promise.all de demarrage, reload runtime inclus). Un echec de
+ * chargement ne reste pas en cache : l'appel suivant reessaie.
+ */
+export function getBundledVrmBuffer(
+  load: () => Promise<ArrayBuffer>
+): Promise<ArrayBuffer> {
+  if (bundledVrmBufferPromise === null) {
+    bundledVrmBufferPromise = load().catch((error) => {
+      bundledVrmBufferPromise = null;
+      throw error;
+    });
+  }
+  return bundledVrmBufferPromise;
+}
+
+/** Tests : vide la calibration module (buffer cache + hauteur mesuree). */
+export function resetVrmCalibration(): void {
+  bundledVrmBufferPromise = null;
+  bundledVrmHeight = null;
+}
+
 /**
  * Charge alcove, VRM et animation VRMA depuis des buffers, monte la scene,
  * et renvoie un handle de frames.
  *
  * @param gl contexte expo-gl (GLView.onContextCreate)
  * @param width, height dimensions du GLView
- * @param buffers binaires des trois assets
+ * @param buffers binaires des trois assets + buffer du bundle lobster
+ *   (precharge une fois par session par l'appelant via `getBundledVrmBuffer`,
+ *   base de la calibration de hauteur cible)
  * @throws en cas d'echec de parsing : le composant affiche error + retry.
  */
 export async function startPreviewRuntime(
   gl: ExpoWebGLRenderingContext,
   width: number,
   height: number,
-  buffers: { vrm: ArrayBuffer; alcove: ArrayBuffer; animation: ArrayBuffer }
+  buffers: {
+    vrm: ArrayBuffer;
+    alcove: ArrayBuffer;
+    animation: ArrayBuffer;
+    bundledVrm: ArrayBuffer;
+  }
 ): Promise<PreviewHandle> {
   let disposed = false;
   const disposables: Array<{ dispose: () => void }> = [];
@@ -199,22 +306,34 @@ export async function startPreviewRuntime(
   vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
 
   const vrm = await new Promise<VRM>((resolve, reject) => {
-    vrmLoader.parse(buffers.vrm, "", (gltf) => {
-      const vrm = gltf.userData.vrm as VRM | undefined;
-      if (!vrm) {
-        reject(new Error("VRMLoaderPlugin did not produce a VRM"));
-        return;
+    vrmLoader.parse(buffers.vrm, "", async (gltf) => {
+      try {
+        const vrm = gltf.userData.vrm as VRM | undefined;
+        if (!vrm) {
+          reject(new Error("VRMLoaderPlugin did not produce a VRM"));
+          return;
+        }
+        // Nettoyage squelette/recommended par three-vrm.
+        VRMUtils.removeUnnecessaryVertices(gltf.scene);
+        VRMUtils.combineSkeletons(gltf.scene);
+        // Calibration 15/09 v2 : cible = hauteur native du bundle lobster
+        // (baseline visuel, alcove a ses unites natives), pas une constante
+        // arbitraire. Rotation 0.x d'abord, PUIS mesure/normalisation :
+        // sinon la hauteur d'un modele 0.x serait mesuree sur le mauvais axe.
+        VRMUtils.rotateVRM0(vrm);
+        const vrmIsBundled = buffers.vrm === buffers.bundledVrm;
+        const targetVrmHeight = await resolveTargetVrmHeight(
+          vrmIsBundled
+            ? { isBundledVrm: true, nativeHeight: standingHeight(vrm.scene) }
+            : { isBundledVrm: false, bundledVrm: buffers.bundledVrm }
+        );
+        // Le bundle lui-meme : scale = target/native = 1 (jamais rescale) ;
+        // un resident : porte a la hauteur du lobster.
+        normalizeVrmHeight(vrm.scene, targetVrmHeight);
+        resolve(vrm);
+      } catch (error) {
+        reject(error);
       }
-      // Nettoyage squelette/recommended par three-vrm.
-      VRMUtils.removeUnnecessaryVertices(gltf.scene);
-      VRMUtils.combineSkeletons(gltf.scene);
-  // Normalisation standard (incident 15/09 : zoom apparent variable du simple
-  // au triple selon la bbox du VRM). Rotation VRM 0.x d'abord, PUIS bbox :
-  // sinon la hauteur d'un modele 0.x serait mesuree sur le mauvais axe.
-  // Mutation en place (scale), idempotente, sans rechargement.
-  VRMUtils.rotateVRM0(vrm);
-  normalizeVrmHeight(vrm.scene, TARGET_VRM_HEIGHT);
-  resolve(vrm);
     }, reject);
   });
 
@@ -227,10 +346,10 @@ export async function startPreviewRuntime(
     lookAtProxy.name = "VRMLookAtQuaternionProxy";
     vrm.scene.add(lookAtProxy);
   }
-  // Cadrage automatique (Phase 4) : le VRM est deja normalise a
-  // TARGET_VRM_HEIGHT, donc bboxSize.y ~ TARGET_VRM_HEIGHT pour tout modele.
-  // fillDistance * 1.45 est des lors une constante : le cadrage est fixe,
-  // seul le calage en position suit la bbox (pivot variables).
+  // Cadrage automatique (Phase 4) : le VRM est normalise a la hauteur cible
+  // (hauteur native du bundle lobster), donc bboxSize.y ~ targetVrmHeight
+  // pour tout modele. fillDistance * 1.45 est des lors une constante : le
+  // cadrage est fixe, seul le calage en position suit la bbox (pivot variables).
   const bbox = new THREE.Box3().setFromObject(vrm.scene);
   const bboxSize = bbox.getSize(new THREE.Vector3());
   const bboxCenter = bbox.getCenter(new THREE.Vector3());
@@ -297,10 +416,10 @@ export async function startPreviewRuntime(
   });
   const alcoveScene = (alcoveGltf as { scene: THREE.Group }).scene;
   // Positionnement relatif a l'avatar : centre sur la bbox de l'avatar
-  // (desormais de hauteur constante TARGET_VRM_HEIGHT), a l'echelle native de
-  // l'alcove (les unites du .glb sont les leurs) — l'alcove reste un
-  // referentiel stable visuellement pour tout VRM, comme cote Web
-  // (`environmentLoader.ts` : "stable size benchmark").
+  // (normalise a la hauteur du bundle, l'echelle de reference visuelle), a
+  // l'echelle native de l'alcove (les unites du .glb sont les leurs) — le
+  // ratio alcove/avatar est celui du cadrage d'origine du lobster, comme
+  // cote Web (`environmentLoader.ts` : "stable size benchmark").
   alcoveScene.position.set(bboxCenter.x, bbox.min.y, bboxCenter.z);
   scene.add(alcoveScene);
 
