@@ -258,12 +258,18 @@ function disposeSceneResources(scene: THREE.Object3D | null): void {
 export type LobsterReference = {
   footprint: ModelFootprint;
   boundsBottom: number;
+  /** Echelle du lobster cadre (constante pour l'alcove, TOUT modele). */
+  environmentScale: THREE.Vector3;
+  /** Position du lobster cadre (constante pour l'alcove, TOUT modele). */
+  environmentPosition: THREE.Vector3;
 };
 
 /** Fallback si la mesure du lobster echoue (mirroir d'AvatarScene Electron). */
 const FALLBACK_LOBSTER_REFERENCE: LobsterReference = {
   footprint: { width: REF_MAX_AXIS, height: REF_MAX_AXIS },
   boundsBottom: -0.05,
+  environmentScale: new THREE.Vector3(1, 1, 1),
+  environmentPosition: new THREE.Vector3(),
 };
 
 // --- Calibration (bundle lobster, une fois par session) -------------------
@@ -307,6 +313,8 @@ export async function measureLobsterReference(
   return {
     footprint: framing.footprint,
     boundsBottom: framing.finalBoundsBottom,
+    environmentScale: framing.finalScale.clone(),
+    environmentPosition: framing.finalPosition.clone(),
   };
 }
 
@@ -442,22 +450,31 @@ export async function startPreviewRuntime(
   // du lobster (inseree 0.9/0.82). Proportions natives preservees, alcove a
   // la meme echelle/position que le modele, camera FIXE.
   const isLobster = buffers.vrm === buffers.bundledVrm;
+  // Taille native du modele affiche (avant cadrage) — pour le diagnostic.
+  const nativeBounds = measureRenderableMeshBounds(vrm.scene);
   let framing: AppliedFraming;
+  // Reference alcove : CONSTANTE du lobster, quel que soit le modele affiche.
+  let environmentReference: LobsterReference;
   if (isLobster) {
     framing = applyMeasuredFraming(vrm.scene, {
       kind: "maxAxis",
       value: REF_MAX_AXIS,
     });
-    // Le lobster cadre devient la reference pour les modeles importes.
-    lobsterReference = {
+    // Le lobster cadre devient la reference (empreinte + echelle/position
+    // de l'alcove) pour les modeles importes.
+    environmentReference = {
       footprint: framing.footprint,
       boundsBottom: framing.finalBoundsBottom,
+      environmentScale: framing.finalScale.clone(),
+      environmentPosition: framing.finalPosition.clone(),
     };
+    lobsterReference = environmentReference;
   } else {
     const reference = await resolveLobsterReference({
       isLobster: false,
       bundledVrm: buffers.bundledVrm,
     });
+    environmentReference = reference;
     framing = applyMeasuredFraming(
       vrm.scene,
       { kind: "footprint", value: computeInsetFootprint(reference.footprint) },
@@ -540,12 +557,34 @@ export async function startPreviewRuntime(
     alcoveLoader.parse(buffers.alcove, "", resolve, reject);
   });
   const alcoveScene = (alcoveGltf as { scene: THREE.Group }).scene;
-  // L'alcove suit la MEME echelle/position que le modele cadre (comportement
-  // du /hologram Desktop : `environmentScale`/`environmentPosition` =
-  // `framing.finalScale`/`finalPosition`).
-  alcoveScene.scale.copy(framing.finalScale);
-  alcoveScene.position.copy(framing.finalPosition);
+  // L'alcove suit l'echelle/position du LOBSTER (constante), PAS celle du
+  // modele affiche — comportement /hologram : `environmentScale`/
+  // `environmentPosition` viennent du `lobsterReference` (cadrage maxAxis du
+  // lobster), tandis que le modele importe est cadre en empreinte (plus petit).
+  alcoveScene.scale.copy(environmentReference.environmentScale);
+  alcoveScene.position.copy(environmentReference.environmentPosition);
   scene.add(alcoveScene);
+
+  // Diagnostic cadrage (aide terrain) : valeurs mesurees, en DEV uniquement.
+  if (__DEV__) {
+    console.log(
+      "[previewRuntime] framing",
+      JSON.stringify({
+        isLobster,
+        nativeSize: nativeBounds.size.toArray().map((v) => Number(v.toFixed(3))),
+        modelScale: framing.finalScale.toArray().map((v) => Number(v.toFixed(3))),
+        modelFinalSize: framing.finalSize.toArray().map((v) => Number(v.toFixed(3))),
+        modelPosition: framing.finalPosition.toArray().map((v) => Number(v.toFixed(3))),
+        alcoveScale: environmentReference.environmentScale.toArray().map((v) => Number(v.toFixed(3))),
+        alcovePosition: environmentReference.environmentPosition.toArray().map((v) => Number(v.toFixed(3))),
+        footprint: environmentReference.footprint,
+        cameraPos: camera.position.toArray().map((v) => Number(v.toFixed(3))),
+        cameraTarget: camTarget.toArray().map((v) => Number(v.toFixed(3))),
+        fov: camera.fov,
+        aspect: camera.aspect,
+      })
+    );
+  }
 
   /** Applique un zoom contraint et repositionne la camera (distance seule). */
   function applyZoom(nextZoom: number): void {

@@ -69,6 +69,8 @@ describe("resolveLobsterReference (cache une fois par session)", () => {
   const reference = (): LobsterReference => ({
     footprint: { width: 1.8, height: 1.8 },
     boundsBottom: -0.05,
+    environmentScale: new THREE.Vector3(1, 1, 1),
+    environmentPosition: new THREE.Vector3(),
   });
 
   beforeEach(() => {
