@@ -421,7 +421,83 @@ export async function sendWifiProvisioning(
 }
 
 /**
- * Valide le corps JSON de `POST /api/device-config` en succes (contrat v1,
+ * Resultat de `resetProvisioning` (route 15/09/2026).
+ *
+ * - demande acceptee (202 attendu) ;
+ * - echec reseau apres l'envoi : l'appliance a probablement deja tue le
+ *   serveur en se relancant vers le mode provisioning — transition NORMALE,
+ *   non fatale (meme logique que le 202 de `/provisioning/wifi`) ;
+ * - erreur reelle affichable (HTTP 4xx/5xx, payload invalide, coordonnees).
+ */
+export type ProvisioningResetResult =
+  | { ok: true; restartRequired: boolean }
+  | { reachable: false }
+  | { ok: false; error: string };
+
+/**
+ * Demande a l'appliance de purger ses credentials WiFi et de relancer en
+ * mode provisioning : `POST /api/provisioning/reset` (protocole 15/09/2026),
+ * servie par le serveur NORMAL (LAN, port 43178 par defaut), corps vide,
+ * idempotente. Reponse 202 `{ok, restartRequired, message}` validee sans
+ * confiance.
+ *
+ * Apres l'acceptation, l'appliance relance pendant plusieurs secondes et
+ * devient injoignable : un echec reseau ici est retourne `reachable:false`
+ * (transition normale), JAMAIS comme une erreur affichable. Seules les
+ * erreurs HTTP 4xx/5xx et les payloads invalides sont des erreurs reelles.
+ *
+ * @param host IPv4 du Desktop (serveur normal, pas le hotspot).
+ * @param port port HTTP du serveur normal.
+ * @param timeoutMs delai max avant `reachable: false` (4000 ms par defaut).
+ */
+export async function resetProvisioning(
+  host: string,
+  port: number,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<ProvisioningResetResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/provisioning/reset`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      }
+    );
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `HTTP ${response.status} pendant la demande de reset.`,
+      };
+    }
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    const r = body as Record<string, unknown> | null;
+    if (r === null || r.ok !== true) {
+      return { ok: false, error: "Réponse de reset invalide." };
+    }
+    // `restartRequired` est additif : absent (serveur anterieur) = false.
+    return { ok: true, restartRequired: r.restartRequired === true };
+  } catch {
+    // Timeout ou refus de connexion : l'appliance tue probablement deja le
+    // serveur pour relancer en mode provisioning — transition normale.
+    return { reachable: false };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Valide le corps JSON de `GET /api/device-config` en succes (contrat v1,
  * `docs/contract/POST-device-config-response-ok.json`), sans lui faire
  * confiance : `ok !== true`, `configVersion`/`appliedAt` non-textes ou
  * `warnings` non-tableau de chaines sont des erreurs de payload.

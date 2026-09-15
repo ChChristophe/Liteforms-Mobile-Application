@@ -8,6 +8,7 @@ import {
   parseProvisioningHealth,
   parseProvisioningStatus,
   fetchProvisioningStatus,
+  resetProvisioning,
   fetchVrmList,
   parseVrmList,
 } from "./deviceClient";
@@ -216,6 +217,88 @@ describe("sendDeviceConfig", () => {
     ).toBe(false);
     expect(parseDeviceConfigAck({ ok: false }).ok).toBe(false);
     expect(parseDeviceConfigAck(null).ok).toBe(false);
+  });
+});
+
+describe("resetProvisioning (15/09/2026)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("poste un corps vide sur /api/provisioning/reset et parse le 202", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            restartRequired: true,
+            message: "Provisioning reset accepted",
+          }),
+          { status: 202 }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await resetProvisioning("192.168.1.42", 43178);
+
+    expect(result).toEqual({ ok: true, restartRequired: true });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("http://192.168.1.42:43178/api/provisioning/reset");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("echec reseau apres envoi = reachable:false, non fatal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Network request failed");
+      })
+    );
+    const result = await resetProvisioning("192.168.1.42", 43178);
+    expect(result).toEqual({ reachable: false });
+  });
+
+  it("timeout (appliance en relance) = reachable:false", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const error = new Error("Aborted");
+        error.name = "AbortError";
+        throw error;
+      })
+    );
+    const result = await resetProvisioning("192.168.1.42", 43178);
+    expect(result).toEqual({ reachable: false });
+  });
+
+  it("HTTP 4xx/5xx = erreur reelle affichable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: false }), { status: 404 }))
+    );
+    const result = await resetProvisioning("192.168.1.42", 43178);
+    expect(result).toEqual({
+      ok: false,
+      error: "HTTP 404 pendant la demande de reset.",
+    });
+  });
+
+  it("payload sans ok:true = erreur reelle", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(null), { status: 200 }))
+    );
+    const result = await resetProvisioning("192.168.1.42", 43178);
+    expect(result).toEqual({ ok: false, error: "Réponse de reset invalide." });
+  });
+
+  it("coordonnees invalides = erreur sans appel fetch", async () => {
+    const result = await resetProvisioning("desktop.local", 43178);
+    expect("ok" in result && result.ok).toBe(false);
   });
 });
 

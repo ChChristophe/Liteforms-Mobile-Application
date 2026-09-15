@@ -4,7 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useOnboardingStore } from '../../stores/onboardingStore';
-import { validateHostPort, buildDesktopUrl } from '../../lib/network/deviceClient';
+import {
+  validateHostPort,
+  buildDesktopUrl,
+  resetProvisioning,
+} from '../../lib/network/deviceClient';
 import type { WifiProvisioningRequest } from '../../types/device';
 
 /**
@@ -34,6 +38,8 @@ export default function AdvancedConnectionScreen() {
   const forgetDesktop = useConnectionStore((s) => s.forgetDesktop);
   const resetOnboarding = useOnboardingStore((s) => s.reset);
   const [hostInput, setHostInput] = useState('');
+  // Verrou du bouton « Relancer l'appairage » (try/finally dans onResetPairing).
+  const [resetting, setResetting] = useState(false);
   const [portInput, setPortInput] = useState('');
   const [hotspotHost, setHotspotHost] = useState('192.168.4.1');
   const [hotspotPort, setHotspotPort] = useState('8080');
@@ -74,10 +80,31 @@ export default function AdvancedConnectionScreen() {
     if (result.ok) setWifiPassword('');
   }
 
-  /** Oublie tout puis relance l'appairage automatique. */
+  /**
+   * Relance l'appairage complet : demande d'abord a l'appliance connue de
+   * purger ses credentials WiFi et de relancer en mode provisioning
+   * (`POST /api/provisioning/reset`, protocole 15/09/2026) — best-effort :
+   * l'echec reseau post-envoi est la transition NORMALE (l'appliance se
+   * relance, donc injoignable quelques secondes), jamais une erreur ; puis
+   * reset local de l'onboarding. try/finally : le bouton ne reste jamais
+   * gele (lecon PLAN.md §2.7).
+   */
   async function onResetPairing(): Promise<void> {
-    await resetOnboarding();
-    router.replace('/connect');
+    setResetting(true);
+    try {
+      const { host, port } = useConnectionStore.getState();
+      if (connectedDesktop !== null && host !== null && port !== null) {
+        const result = await resetProvisioning(host, port);
+        if ("ok" in result && result.ok === false) {
+          useConnectionStore.setState({ lastError: result.error });
+          return;
+        }
+      }
+      await resetOnboarding();
+      router.replace('/connect');
+    } finally {
+      setResetting(false);
+    }
   }
 
   return (
@@ -185,8 +212,9 @@ export default function AdvancedConnectionScreen() {
         )}
 
         <Pressable
-          style={styles.linkButton}
+          style={[styles.linkButton, resetting && styles.buttonDisabled]}
           accessibilityRole="button"
+          disabled={resetting}
           onPress={() => void onResetPairing()}
         >
           <Text style={styles.forgetText}>Relancer l'appairage</Text>
