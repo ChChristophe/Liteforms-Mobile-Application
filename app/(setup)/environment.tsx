@@ -3,17 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import ColorPicker, { HueSlider, Panel1, Preview } from 'reanimated-color-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ColorFormatsObject } from 'reanimated-color-picker/lib/typescript/types';
-import { AVATAR_MOODS, type AvatarMood } from '../../types/config';
+import { MoodChips } from '../../components/setup/MoodChips';
 import { useConfigStore } from '../../stores/configStore';
-
-/** Libelles affiches des humeurs (valeurs de contrat en anglais). */
-const MOOD_LABELS: Record<AvatarMood, string> = {
-  happy: 'Joyeux',
-  sad: 'Triste',
-  angry: 'En colère',
-  surprised: 'Surpris',
-  relaxed: 'Détendu',
-};
 
 /** Meme regle que la validation du domaine : #rrggbb minuscule strict. */
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
@@ -38,7 +29,6 @@ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
  */
 export default function EnvironmentScreen() {
   const environment = useConfigStore((state) => state.config.environment);
-  const avatarMood = useConfigStore((state) => state.config.avatar.mood);
   const updateEnvironment = useConfigStore((state) => state.updateEnvironment);
   const updateAvatar = useConfigStore((state) => state.updateAvatar);
 
@@ -62,33 +52,8 @@ function onColorCompleteJS(colors: ColorFormatsObject): void {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.label}>Humeur du preview</Text>
-        <View style={styles.chipWrap}>
-          <Pressable
-            style={[styles.chip, avatarMood === null && styles.chipSelected]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: avatarMood === null }}
-            onPress={() => updateAvatar({ mood: null })}
-          >
-            <Text style={[styles.chipText, avatarMood === null && styles.chipTextSelected]}>
-              Défaut
-            </Text>
-          </Pressable>
-          {AVATAR_MOODS.map((mood) => {
-            const selected = avatarMood === mood;
-            return (
-              <Pressable
-                key={mood}
-                style={[styles.chip, selected && styles.chipSelected]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => updateAvatar({ mood })}
-              >
-                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                  {MOOD_LABELS[mood]}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.moodRow}>
+          <MoodChips onMoodSelect={(mood) => updateAvatar({ mood })} />
         </View>
 
         <Text style={styles.label}>Couleur de l'alcove</Text>
@@ -134,10 +99,7 @@ const styles = StyleSheet.create({
     color: '#374151',
     marginBottom: 10,
   },
-  chipWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  moodRow: {
     marginBottom: 28,
   },
   chip: {

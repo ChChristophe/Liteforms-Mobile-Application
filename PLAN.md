@@ -1228,6 +1228,19 @@ Corrections d'accompagnement :
   rechargements runtime, background/foreground, changement de modele ;
   restent non verifies : mesures memoire, appareil iOS.
 
+#### Statut Phase 4 — 15/09/2026 : mood visible en direct dans le preview
+
+Chips d'humeur extraites de l'ecran Ambiance en `components/setup/MoodChips.tsx`
+(logique pure testee, deux variantes light/dark, aucune couleur hardcodee
+dupliquee) et posees sur `app/(setup)/avatar-preview.tsx` sous les reglages
+de pose (variante sombre) : un appui ecrit `config.avatar.mood`, l'effet
+`[mood]` de `AvatarPreview` applique `setMood` sur le runtime courant —
+expression changee dans la seconde, sans recharger le VRM ni remonter le
+GLView (sous-phase 4.4, chemin deja eprouve). Contexte pose libre : chips
+posees a l'ecran (sous `AvatarPreview`), le composant GL critique n'est pas
+touche ; le bandeau ne peut pas deborder (ecran a hauteur fixe, pas de
+scrollable). L'ecran Ambiance reutilise MoodChips, comportement inchange.
+
 ---
 
 ### Phase 5 — Selection et catalogue VRM
