@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AvatarPreview } from '../../components/avatar/AvatarPreview';
 import { MoodChips } from '../../components/setup/MoodChips';
@@ -32,10 +32,16 @@ export default function AvatarPreviewScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <AvatarPreview />
       <View style={styles.moodBanner}>
-        <MoodChips
-          variant="dark"
-          onMoodSelect={(mood) => updateAvatar({ mood })}
-        />
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.moodScrollContent}
+        >
+          <MoodChips
+            variant="dark"
+            onMoodSelect={(mood) => updateAvatar({ mood })}
+          />
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -47,9 +53,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b1120',
   },
   moodBanner: {
-    paddingVertical: 4,
-    paddingHorizontal: 12,
+    // Hauteur FIXE (une rangée) : si le bandeau wrap a 2 lignes, le GLView
+    // (flex:1) changeait de hauteur et l'aspect de la camera variait
+    // (« l'alcove change de resolution »). Une seule rangée scrollable
+    // horizontalement = hauteur stable, GLView stable, cadrage stable.
+    height: 56,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#1f2937',
+  },
+  moodScrollContent: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
 });
