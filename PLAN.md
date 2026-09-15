@@ -1792,6 +1792,37 @@ Limites : si le resident est affiche avant que le lobster ait jamais ete
 affiche, un parse supplementaire du bundle a lieu (une fois par session max).
 VRM 0.x extremes : inchanges (voir limites v1).
 
+### Decision produit 15/09 (v3) — camera figee sur le baseline lobster
+
+Regression persistante (3e run) apres 0f99e51 + b71090c : la TAILLE visible
+alcove+avatar variait ENCORE selon le VRM charge. Cause racine : `fillDistance`
+etait derive de `maxDimension = max(x, y, z)` de la bbox du VRM AFFICHE — un
+VRM aux bras ecartes (bbox X > Y) etait dezoome, un VRM fin surzoome. Tant que
+la camera derive d'une mesure du modele affiche, le zoom varie : seule l'alcove
+est une reference stable.
+
+* La baseline mesuree une fois par session (`bundledVrmHeight`) est ETENDEE a
+  une baseline camera complete sur la bbox du lobster PARSE :
+  `bundledVrmHalfMaxDim` = demi-max-dimension (formule exacte :
+  `fillDistance = halfMaxDim / tan(fov/2)`, fond d'ecran
+  `camera.position.z = centre.z + fillDistance * CAM_FILL_DISTANCE_FACTOR`
+  (1.45) et `centre.y + hauteurLobster * CAM_PIVOT_OFFSET_Y_FACTOR` (0.05) —
+  les deltas -0.05y / 1.45z en dur deviennent ces constantes).
+* Le load d'un VRM (bundled OU resident normalise a la hauteur lobster) place
+  la camera a la distance FIXE baseline depuis le centre de la bbox affichee,
+  memes offsets : PLUS AUCUN `maxDimension` mesure par VRM dans le cadrage.
+* La bbox du VRM affiche ne sert plus qu'au calage POSITION (centre/min.y de
+  l'alcove, bboxCorners du geste) et au calage vertical — jamais au zoom.
+* Fallback securitaire si le lobster est illisible : halfMaxDim = hauteur
+  cible/2 (0.5), meme ordre de cadrage que le fallback v2.
+
+Limites connues : le zoom (geste) reste un multiplicateur de la distance
+portée (`cameraDistance / zoom`) — le referentiel du geste est inchange. Un
+VRM TRES hors norme (t-pose extreme, pivot tres decale) reste borne : son
+cadrage est celui du lobster, seul son calage vertical suit sa bbox. Si un
+cadrage adapte par morphologie devient un jour necessaire, ce sera une
+decision camera explicite (pas un effet de bord de mesure).
+
 ### Objectifs
 
 - ne pas bloquer l'UI pendant le chargement ;
