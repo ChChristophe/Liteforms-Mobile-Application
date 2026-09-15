@@ -59,8 +59,8 @@ export default function SetupIndexScreen() {
     {
       title: 'Ambiance',
       subtitle: alcoveColor
-        ? `Mood et couleur d'alcove — actuellement : ${alcoveColor}`
-        : 'Mood et couleur d\'alcove — actuellement : défaut',
+        ? "Mood et couleur d'alcove — actuellement : couleur personnalisée"
+        : "Mood et couleur d'alcove — actuellement : défaut",
       href: '/environment',
     },
     {

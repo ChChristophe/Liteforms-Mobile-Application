@@ -146,7 +146,9 @@ export default function ReviewScreen() {
           <View style={styles.colorRow}>
             <Text style={styles.detail}>
               Mood : {moodLabel(config.avatar.mood)} — Alcove :{' '}
-              {config.environment.alcoveColor ?? 'Défaut'}
+              {config.environment.alcoveColor === null
+                ? 'Défaut (appliance)'
+                : 'Couleur personnalisée'}
             </Text>
             {config.environment.alcoveColor !== null && (
               <View

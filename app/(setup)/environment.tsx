@@ -101,7 +101,7 @@ function onColorCompleteJS(colors: ColorFormatsObject): void {
           >
             <Panel1 style={styles.panel} />
             <HueSlider style={styles.slider} />
-            <Preview style={styles.preview} />
+            <Preview style={styles.preview} hideText />
           </ColorPicker>
         </GestureHandlerRootView>
         <Pressable
