@@ -1739,6 +1739,32 @@ appareil reel. TypeScript et Vitest ne suffisent pas pour ces chemins.
 
 ## 9. Performance et limites acceptees
 
+### Decision produit 15/09 — cadrage preview normalise (incident zoom variable)
+
+Incident terrain : le niveau de zoom apparent de l'ensemble alcove+VRM variait
+du simple au triple selon le VRM telecharge (bbox differentes : bras ecartes,
+hauteur, pivot). Fix : referentiel commun, comme cote Web/Electron
+(« alcove remains a stable size benchmark »).
+
+* Chaque VRM est normalise a `TARGET_VRM_HEIGHT = 1.0` unite monde (lib
+  `previewRuntime`, `normalizeVrmHeight`) : invariant `1.0 = hauteur debout
+  de l'avatar`. Mesure sur la HAUTEUR bbox (Y), pas le plus grand axe, sinon
+  un VRM aux bras ecartes serait retreci.
+* La normalisation a lieu apres `VRMUtils.rotateVRM0` (le bbox d'un VRM 0.x
+  doit etre mesure sur l'orientation corrigee) et avant le calcul du cadrage.
+* Le cadrage camera devient constant : fillDistance*1.45 et l'offset +0.05 ne
+  dependent plus que d'une bbox normalisee identique pour tout VRM.
+* L'alcove reste a l'echelle native et se cale automatiquement sur la bbox
+  (centre + min.y) : meme cadrage visuel pour tout VRM (baseline = lobster
+  normalise, meilleure run d'accompagnement au 15/09).
+* Mutation en place au chargement (scale), idempotente, sans rechargement ;
+  dispose et purge texture cache inchanges.
+
+Limites connues : VRM 0.x extremes (pivot tres decale) et humanoids non
+pivotes proprement peuvent rester legerement decales en position, pas en
+zoom. Un VRM plus large que haut ferait varier fillDistance via
+maxDimension ; acceptable au POC (les VRM courants sont plus hauts que larges).
+
 ### Objectifs
 
 - ne pas bloquer l'UI pendant le chargement ;

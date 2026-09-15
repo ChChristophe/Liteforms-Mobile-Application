@@ -19,6 +19,19 @@ import {
 import type { AvatarMood } from "../../types/config";
 
 /**
+ * Hauteur standard de l'avatar en unites monde. Invariant de cadrage :
+ * chaque VRM est normalise a cette hauteur AVANT le calcul de la bbox, donc
+ * 1 unite monde = hauteur de l'avatar. La distance camera (fillDistance)
+ * devient une constante identique pour tout VRM — le cadrage alcove+VRM
+ * ne varie plus du simple au triple selon le modele telecharge.
+ *
+ * La normalisation se fait sur la HAUTEUR debout (bboxSize.y), pas sur le
+ * plus grand axe : un VRM aux bras ecartes aurait une bbox large et serait
+ * retreci en hauteur. La hauteur est la mesure stable d'une silhouette.
+ */
+export const TARGET_VRM_HEIGHT = 1.0;
+
+/**
  * Runtime de preview VRM natif (PLAN.md Phase 4).
  *
  * Pipeline exige :
@@ -102,6 +115,26 @@ export type PreviewHandle = {
   dispose: () => void;
 };
 
+/**
+ * Normalise un VRM a `targetHeight` (unites monde) : un seul facteur de
+ * scale applique sur la scene, mesure sur la HAUTEUR (bboxSize.y) — pas sur
+ * le plus grand axe, sinon un VRM aux bras ecartes serait retreci en
+ * hauteur. Mutation en place, idempotente (re-appliquer donne hauteur
+ * cible), sans rechargement d'asset. Degenerescences (bbox vide, hauteur
+ * nulle ou negative) : no-op securitaire, jamais de crash ni de scale
+ * infini.
+ */
+export function normalizeVrmHeight(
+  scene: THREE.Object3D,
+  targetHeight: number
+): void {
+  if (!(targetHeight > 0)) return;
+  const box = new THREE.Box3().setFromObject(scene);
+  const size = box.getSize(new THREE.Vector3());
+  if (!(size.y > 0)) return;
+  scene.scale.multiplyScalar(targetHeight / size.y);
+}
+
 function disposeSceneResources(scene: THREE.Object3D | null): void {
   if (!scene) return;
   scene.traverse((object: THREE.Object3D) => {
@@ -175,10 +208,13 @@ export async function startPreviewRuntime(
       // Nettoyage squelette/recommended par three-vrm.
       VRMUtils.removeUnnecessaryVertices(gltf.scene);
       VRMUtils.combineSkeletons(gltf.scene);
-      // VRM 0.x regarde +Z ; la camera three vise -Z. Rotation de 180 degres
-      // (reference Web `AvatarScene`) sinon l'avatar presente son dos.
-      VRMUtils.rotateVRM0(vrm);
-      resolve(vrm);
+  // Normalisation standard (incident 15/09 : zoom apparent variable du simple
+  // au triple selon la bbox du VRM). Rotation VRM 0.x d'abord, PUIS bbox :
+  // sinon la hauteur d'un modele 0.x serait mesuree sur le mauvais axe.
+  // Mutation en place (scale), idempotente, sans rechargement.
+  VRMUtils.rotateVRM0(vrm);
+  normalizeVrmHeight(vrm.scene, TARGET_VRM_HEIGHT);
+  resolve(vrm);
     }, reject);
   });
 
@@ -191,8 +227,10 @@ export async function startPreviewRuntime(
     lookAtProxy.name = "VRMLookAtQuaternionProxy";
     vrm.scene.add(lookAtProxy);
   }
-  // Cadrage automatique (Phase 4) : la boite englobante remplace la position
-  // d'illusion pour n'importe quel VRM (taille et pivot variables).
+  // Cadrage automatique (Phase 4) : le VRM est deja normalise a
+  // TARGET_VRM_HEIGHT, donc bboxSize.y ~ TARGET_VRM_HEIGHT pour tout modele.
+  // fillDistance * 1.45 est des lors une constante : le cadrage est fixe,
+  // seul le calage en position suit la bbox (pivot variables).
   const bbox = new THREE.Box3().setFromObject(vrm.scene);
   const bboxSize = bbox.getSize(new THREE.Vector3());
   const bboxCenter = bbox.getCenter(new THREE.Vector3());
@@ -258,9 +296,11 @@ export async function startPreviewRuntime(
     alcoveLoader.parse(buffers.alcove, "", resolve, reject);
   });
   const alcoveScene = (alcoveGltf as { scene: THREE.Group }).scene;
-  // Positionnement relatif a l'avatar : centre sur la bbox de l'avatar, a
-  // l'echelle native de l'alcove (les unites du .glb sont les leurs). Le
-  // calage fin (echelle/offset) se fera en 4.4-4.5 sur device.
+  // Positionnement relatif a l'avatar : centre sur la bbox de l'avatar
+  // (desormais de hauteur constante TARGET_VRM_HEIGHT), a l'echelle native de
+  // l'alcove (les unites du .glb sont les leurs) — l'alcove reste un
+  // referentiel stable visuellement pour tout VRM, comme cote Web
+  // (`environmentLoader.ts` : "stable size benchmark").
   alcoveScene.position.set(bboxCenter.x, bbox.min.y, bboxCenter.z);
   scene.add(alcoveScene);
 
