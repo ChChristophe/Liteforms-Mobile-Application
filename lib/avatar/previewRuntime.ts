@@ -10,6 +10,14 @@ import * as THREE from "three";
 import type { ExpoWebGLRenderingContext } from "expo-gl";
 import { applyAlcoveTint } from "./environmentTint";
 import {
+  computeInsetFootprint,
+  computeModelPositionFromBounds,
+  measureRenderableMeshBounds,
+  solveUniformScaleMultiplierForFootprint,
+  solveUniformScaleMultiplierForMaxAxis,
+  type ModelFootprint,
+} from "./modelFraming";
+import {
   POSE_DEPTH_MAX,
   POSE_DEPTH_MIN,
   POSE_ZOOM_MAX,
@@ -19,33 +27,22 @@ import {
 import type { AvatarMood } from "../../types/config";
 
 /**
- * Fallback de hauteur cible (unites monde), utilisee UNIQUEMENT si la
- * calibration sur le bundle lobster echoue (buffer illisible, bbox vide).
- *
- * Regression 15/09 v2 : la constante 1.0 comme cible systematique desynchronisait
- * l'alcove (unites natives de son .glb) de l'avatar. La cible reelle est la
- * hauteur native mesuree du bundle lobster (`lobsterEdit.vrm`) — baseline
- * visuel de cadrage : le lobster lui-meme n'est JAMAIS rescale (echelle 1),
- * l'alcove garde ses unites, et tout VRM resident est porte a la hauteur du
- * lobster. Le ratio d'origine est preserve et le cadrage reste constant.
+ * Cadrage du preview : reproduction FIDELE du /hologram Desktop
+ * (`modelFraming.ts` + `AvatarScene`). Le lobster est cadre a `maxAxis =
+ * REF_MAX_AXIS`, les modeles importes dans l'empreinte de ce lobster cadre
+ * (inseree 0.9/0.82 par `computeInsetFootprint`). L'alcove suit la MEME
+ * echelle/position que le modele (`environmentScale`/`environmentPosition`).
+ * La camera est FIXE.
  */
-export const TARGET_VRM_HEIGHT = 1.0;
+export const REF_MAX_AXIS = 1.8;
 
-// Facteurs de cadrage camera, figes sur le baseline lobster (incident 15/09
-// v3) : offsets multiples de grandeurs LOBSTER donc constants pour tout VRM
-// affiche — le zoom ne depend plus de la bbox du modele charge.
+// Facteurs de cadrage camera (figes sur le baseline lobster).
 /** Recul camera = fillDistance x ce facteur (cadrage d'origine du Web). */
 export const CAM_FILL_DISTANCE_FACTOR = 1.45;
 /** Calage vertical camera = hauteur lobster x ce facteur (au-dessus du centre). */
 export const CAM_PIVOT_OFFSET_Y_FACTOR = 0.05;
-
-// Cadrage par empreinte (reproduction du /hologram Desktop, `modelFraming.ts`
-// defaults) : le modele affiche est mis a l'echelle uniforme pour tenir dans
-// l'empreinte du lobster, inseree de ces facteurs. Les proportions natives
-// sont preservees (un modele large/plat reste plat, un petit reste petit) —
-// contrairement a une normalisation en hauteur qui ecrasait la morphologie.
-export const IMPORTED_WIDTH_FILL = 0.9;
-export const IMPORTED_HEIGHT_FILL = 0.82;
+/** Decalage vertical des modeles importes (constant d'AvatarScene Electron). */
+export const IMPORTED_MODEL_VERTICAL_OFFSET = 0.025;
 
 /**
  * Runtime de preview VRM natif (PLAN.md Phase 4).
@@ -132,25 +129,105 @@ export type PreviewHandle = {
 };
 
 /**
- * Echelle uniforme du cadrage par empreinte (reproduction du /hologram
- * Desktop, `computeModelFramingByFootprint`) : le plus petit ratio fait foi,
- * si bien que le modele tient ENTIEREMENT dans le rectangle de reference
- * (insere 0.9/0.82). Les proportions natives sont preservees : un modele
- * large/plat reste plat (contraint en largeur), un petit reste petit.
+ * Resultat d'un cadrage (port de `applyMeasuredFraming` d'AvatarScene
+ * Electron) : echelle uniforme + position racine + cible camera.
  */
-export function computeFootprintScale(
-  nativeWidth: number,
-  nativeHeight: number,
-  referenceWidth: number,
-  referenceHeight: number
-): number {
-  const candidates = [
-    nativeWidth > 0 ? (referenceWidth * IMPORTED_WIDTH_FILL) / nativeWidth : 1,
-    nativeHeight > 0
-      ? (referenceHeight * IMPORTED_HEIGHT_FILL) / nativeHeight
-      : 1,
-  ];
-  return Math.min(...candidates);
+type AppliedFraming = {
+  footprint: ModelFootprint;
+  scaleMultiplier: number;
+  finalScale: THREE.Vector3;
+  finalPosition: THREE.Vector3;
+  finalSize: THREE.Vector3;
+  finalBoundsBottom: number;
+  cameraTarget: THREE.Vector3;
+};
+
+function measureSizeAtScale(
+  object: THREE.Object3D,
+  baseScale: THREE.Vector3,
+  basePosition: THREE.Vector3,
+  multiplier: number
+): THREE.Vector3 {
+  object.scale.copy(baseScale).multiplyScalar(multiplier);
+  object.position.copy(basePosition);
+  object.updateWorldMatrix(true, true);
+  return measureRenderableMeshBounds(object).size;
+}
+
+function solveRootPositionForBounds(
+  object: THREE.Object3D,
+  basePosition: THREE.Vector3,
+  finalSize: THREE.Vector3,
+  targetBottom = -0.05
+): THREE.Vector3 {
+  object.position.copy(basePosition);
+  object.updateWorldMatrix(true, true);
+  const baseCenter = measureRenderableMeshBounds(object).center;
+  const solvedPosition = computeModelPositionFromBounds(
+    basePosition,
+    baseCenter,
+    finalSize,
+    targetBottom
+  );
+
+  const probePosition = basePosition.clone();
+  probePosition.y += 1;
+  object.position.copy(probePosition);
+  object.updateWorldMatrix(true, true);
+  const probeCenter = measureRenderableMeshBounds(object).center;
+  const yResponse = probeCenter.y - baseCenter.y;
+  const desiredYShift = solvedPosition.y - basePosition.y;
+  solvedPosition.y = basePosition.y + (Math.abs(yResponse) > 1e-6 ? desiredYShift / yResponse : desiredYShift);
+
+  object.position.copy(solvedPosition);
+  object.updateWorldMatrix(true, true);
+  return solvedPosition;
+}
+
+/** Cadrage (port fidele d'AvatarScene Electron). Mutation en place. */
+function applyMeasuredFraming(
+  object: THREE.Object3D,
+  target:
+    | { kind: "maxAxis"; value: number }
+    | { kind: "footprint"; value: ModelFootprint },
+  options: { targetBottom?: number } = {}
+): AppliedFraming {
+  const baseScale = object.scale.clone();
+  const basePosition = object.position.clone();
+  object.position.copy(basePosition);
+  object.updateWorldMatrix(true, true);
+
+  const measureAtMultiplier = (multiplier: number) =>
+    measureSizeAtScale(object, baseScale, basePosition, multiplier);
+  const scaleMultiplier =
+    target.kind === "maxAxis"
+      ? solveUniformScaleMultiplierForMaxAxis(measureAtMultiplier, target.value)
+      : solveUniformScaleMultiplierForFootprint(measureAtMultiplier, target.value);
+
+  const finalScale = baseScale.clone().multiplyScalar(scaleMultiplier);
+  object.scale.copy(finalScale);
+  object.position.copy(basePosition);
+  object.updateWorldMatrix(true, true);
+  const scaledBounds = measureRenderableMeshBounds(object);
+  const finalPosition = solveRootPositionForBounds(
+    object,
+    basePosition,
+    scaledBounds.size,
+    options.targetBottom
+  );
+  const finalBounds = measureRenderableMeshBounds(object);
+  const finalBoundsBottom = finalBounds.center.y - finalBounds.size.y * 0.5;
+  const cameraTarget = new THREE.Vector3(0, Math.max(0.75, finalBounds.size.y * 0.45), 0);
+
+  return {
+    footprint: { width: finalBounds.size.x, height: finalBounds.size.y },
+    scaleMultiplier,
+    finalScale,
+    finalPosition,
+    finalSize: finalBounds.size,
+    finalBoundsBottom,
+    cameraTarget,
+  };
 }
 
 function disposeSceneResources(scene: THREE.Object3D | null): void {
@@ -173,55 +250,25 @@ function disposeSceneResources(scene: THREE.Object3D | null): void {
   });
 }
 
-/** Baseline d'une scene parse : boite englobante normalisee (lobster). */
-export type VrmBaseline = {
-  /** Hauteur debout (bboxSize.y). */
-  height: number;
-  /** Largeur native (bboxSize.x) — composante d'empreinte du cadrage. */
-  width: number;
-  /** Demi-plus-grand-axe de la bbox (cadrage camera, bras inclus). */
-  halfMaxDim: number;
-  /** Centre de la bbox — cible camera ET alignement du modele affiche. */
-  center: { x: number; y: number; z: number };
-  /** Pieds (bbox.min.y) — ancre de l'alcove. */
-  minY: number;
+/**
+ * Reference de cadrage du lobster (cadre a `maxAxis = REF_MAX_AXIS`) :
+ * son empreinte (X/Y) sert de cible aux modeles importes, `boundsBottom`
+ * sert a caler leurs pieds au meme niveau que le lobster.
+ */
+export type LobsterReference = {
+  footprint: ModelFootprint;
+  boundsBottom: number;
 };
 
-/** Fallback si la mesure du lobster echoue (buffer illisible). */
-const FALLBACK_BASELINE: VrmBaseline = {
-  height: TARGET_VRM_HEIGHT,
-  width: TARGET_VRM_HEIGHT,
-  halfMaxDim: TARGET_VRM_HEIGHT / 2,
-  center: { x: 0, y: TARGET_VRM_HEIGHT / 2, z: 0 },
-  minY: 0,
+/** Fallback si la mesure du lobster echoue (mirroir d'AvatarScene Electron). */
+const FALLBACK_LOBSTER_REFERENCE: LobsterReference = {
+  footprint: { width: REF_MAX_AXIS, height: REF_MAX_AXIS },
+  boundsBottom: -0.05,
 };
 
-function sceneBaseline(scene: THREE.Object3D): VrmBaseline | null {
-  const box = new THREE.Box3().setFromObject(scene);
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  if (!(size.y > 0) || !(maxDim > 0)) return null;
-  const center = box.getCenter(new THREE.Vector3());
-  return {
-    height: size.y,
-    width: size.x,
-    halfMaxDim: maxDim / 2,
-    center: { x: center.x, y: center.y, z: center.z },
-    minY: box.min.y,
-  };
-}
-
-// --- Calibration baseline (bundle lobster, une fois par session) ----------
-// Etat MODULE : le buffer bundle et sa baseline (boite entiere) vivent une
-// fois par session d'app. Le lobster n'est JAMAIS rescale : sa bbox EST le
-// cadrage de reference. Tout autre VRM est (1) normalise a sa hauteur puis
-// (2) translate pour que son centre coincide avec celui du lobster — la
-// camera et l'alcove deviennent des constantes absolues, independantes du
-// modele affiche (incidents 15/09 v1..v4 : toute mesure du VRM affiche
-// faisait varier le zoom/le calage).
-
+// --- Calibration (bundle lobster, une fois par session) -------------------
 let bundledVrmBufferPromise: Promise<ArrayBuffer> | null = null;
-let bundledVrmBaseline: VrmBaseline | null = null;
+let lobsterReference: LobsterReference | null = null;
 
 /** Resultat de parse pour la mesure (injectable en test). */
 type ParsedVrmScene = { scene: THREE.Object3D; vrm: VRM | null };
@@ -237,14 +284,13 @@ async function parseVrmForMeasure(buffer: ArrayBuffer): Promise<ParsedVrmScene> 
 }
 
 /**
- * Mesure la baseline d'un VRM depuis son buffer : parse jetable (geometrie
- * disposee, aucun rendu), `rotateVRM0` avant la mesure (meme ordre que le
- * pipeline, hauteur stable sur Y). Echec de parse -> null.
+ * Mesure la reference de cadrage du lobster depuis son buffer : parse jetable,
+ * `rotateVRM0` avant la mesure, cadrage `maxAxis = REF_MAX_AXIS`. Echec -> null.
  */
-export async function measureVrmBaseline(
+export async function measureLobsterReference(
   buffer: ArrayBuffer,
   parse: (buffer: ArrayBuffer) => Promise<ParsedVrmScene> = parseVrmForMeasure
-): Promise<VrmBaseline | null> {
+): Promise<LobsterReference | null> {
   let parsed: ParsedVrmScene;
   try {
     parsed = await parse(buffer);
@@ -252,34 +298,40 @@ export async function measureVrmBaseline(
     return null;
   }
   if (parsed.vrm) VRMUtils.rotateVRM0(parsed.vrm);
-  const baseline = sceneBaseline(parsed.scene);
+  const framing = applyMeasuredFraming(parsed.scene, {
+    kind: "maxAxis",
+    value: REF_MAX_AXIS,
+  });
   disposeSceneResources(parsed.scene);
   void (parsed.vrm as unknown as { dispose?: () => void } | null)?.dispose?.();
-  return baseline;
+  return {
+    footprint: framing.footprint,
+    boundsBottom: framing.finalBoundsBottom,
+  };
 }
 
 /**
- * Resout la baseline de cadrage (cache module, une mesure par session) :
- * - bundle affiche : sa bbox native mesuree devient la reference (echelle 1) ;
+ * Resout la reference lobster (cache module, une mesure par session) :
+ * - lobster affiche : sa reference mesuree devient le cache ;
  * - resident affiche : cache si present, sinon mesure PARESSEUSE du buffer
- *   bundle ; echec -> fallback (cache non pollue, retentee au reload) ;
- * - retourne TOUJOURS une baseline (jamais null).
+ *   bundle ; echec -> fallback (cache non pollue) ;
+ * - retourne TOUJOURS une reference (jamais null).
  */
-export async function resolveVrmBaseline(input: {
-  isBundledVrm: boolean;
-  nativeBaseline?: VrmBaseline | null;
+export async function resolveLobsterReference(input: {
+  isLobster: boolean;
+  nativeReference?: LobsterReference | null;
   bundledVrm?: ArrayBuffer;
   parse?: (buffer: ArrayBuffer) => Promise<ParsedVrmScene>;
-}): Promise<VrmBaseline> {
-  if (input.isBundledVrm && input.nativeBaseline) {
-    bundledVrmBaseline = input.nativeBaseline;
-  } else if (bundledVrmBaseline === null && input.bundledVrm) {
-    const measured = await measureVrmBaseline(input.bundledVrm, input.parse);
+}): Promise<LobsterReference> {
+  if (input.isLobster && input.nativeReference) {
+    lobsterReference = input.nativeReference;
+  } else if (lobsterReference === null && input.bundledVrm) {
+    const measured = await measureLobsterReference(input.bundledVrm, input.parse);
     if (measured !== null) {
-      bundledVrmBaseline = measured;
+      lobsterReference = measured;
     }
   }
-  return bundledVrmBaseline ?? FALLBACK_BASELINE;
+  return lobsterReference ?? FALLBACK_LOBSTER_REFERENCE;
 }
 
 /**
@@ -299,10 +351,10 @@ export function getBundledVrmBuffer(
   return bundledVrmBufferPromise;
 }
 
-/** Tests : vide la calibration module (buffer cache + baseline mesuree). */
+/** Tests : vide la calibration module (buffer cache + reference mesuree). */
 export function resetVrmCalibration(): void {
   bundledVrmBufferPromise = null;
-  bundledVrmBaseline = null;
+  lobsterReference = null;
 }
 
 /**
@@ -352,10 +404,6 @@ export async function startPreviewRuntime(
   scene.add(fillLight);
 
   // --- VRM --------------------------------------------------------------
-  // Baseline de cadrage (boite du lobster, mesuree une fois par session) :
-  // hauteur de normalisation + centre/pieds de reference pour la camera et
-  // l'alcove. Initialisee au fallback, affinee dans le callback de parse.
-  let baseline: VrmBaseline = FALLBACK_BASELINE;
   const vrmLoader = new GLTFLoader();
   vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -370,22 +418,8 @@ export async function startPreviewRuntime(
         // Nettoyage squelette/recommended par three-vrm.
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.combineSkeletons(gltf.scene);
-        // Calibration 15/09 v2/v3 : cible = hauteur native du bundle lobster
-        // (baseline visuel, alcove a ses unites natives), pas une constante
-        // arbitraire. Rotation 0.x d'abord, PUIS mesure/normalisation :
-        // sinon la hauteur d'un modele 0.x serait mesuree sur le mauvais axe.
-        // v3 : la baseline camera (demi-max-dim du lobster) est mesuree en
-        // MEME TEMPS — une seule source de cadrage.
+        // Rotation 0.x AVANT le cadrage (mesure sur le bon axe).
         VRMUtils.rotateVRM0(vrm);
-        const vrmIsBundled = buffers.vrm === buffers.bundledVrm;
-        const nativeBaseline = vrmIsBundled ? sceneBaseline(vrm.scene) : null;
-        baseline = await resolveVrmBaseline(
-          vrmIsBundled
-            ? { isBundledVrm: true, nativeBaseline }
-            : { isBundledVrm: false, bundledVrm: buffers.bundledVrm }
-        );
-        // Pas de normalisation en hauteur ici : l'echelle est decidee par le
-        // cadrage par empreinte (plus bas), qui preserve les proportions.
         resolve(vrm);
       } catch (error) {
         reject(error);
@@ -402,54 +436,52 @@ export async function startPreviewRuntime(
     lookAtProxy.name = "VRMLookAtQuaternionProxy";
     vrm.scene.add(lookAtProxy);
   }
-  // Cadrage (incidents 15/09 v1..v5) : reproduction du cadrage par empreinte
-  // du /hologram Desktop. Le lobster est la reference (echelle native, camera
-  // fixe) ; tout autre VRM est mis a l'echelle UNIFORME pour tenir dans
-  // l'empreinte du lobster (inseree 0.9/0.82) — les proportions natives sont
-  // preservees, l'alcove suit la meme echelle/position. Camera fixe, aucune
-  // mesure du modele affiche dans la distance.
-  const nativeBox = new THREE.Box3().setFromObject(vrm.scene);
-  const nativeSize = nativeBox.getSize(new THREE.Vector3());
-  const nativeCenter = nativeBox.getCenter(new THREE.Vector3());
-
+  // Cadrage (reproduction FIDELE du /hologram Desktop : `modelFraming.ts`
+  // + `applyMeasuredFraming` d'AvatarScene). Le lobster est cadre a
+  // `maxAxis = REF_MAX_AXIS` ; un modele importe est cadre dans l'empreinte
+  // du lobster (inseree 0.9/0.82). Proportions natives preservees, alcove a
+  // la meme echelle/position que le modele, camera FIXE.
   const isLobster = buffers.vrm === buffers.bundledVrm;
-  const scale = isLobster
-    ? 1
-    : computeFootprintScale(
-        nativeSize.x,
-        nativeSize.y,
-        baseline.width,
-        baseline.height
-      );
-  vrm.scene.scale.multiplyScalar(scale);
+  let framing: AppliedFraming;
+  if (isLobster) {
+    framing = applyMeasuredFraming(vrm.scene, {
+      kind: "maxAxis",
+      value: REF_MAX_AXIS,
+    });
+    // Le lobster cadre devient la reference pour les modeles importes.
+    lobsterReference = {
+      footprint: framing.footprint,
+      boundsBottom: framing.finalBoundsBottom,
+    };
+  } else {
+    const reference = await resolveLobsterReference({
+      isLobster: false,
+      bundledVrm: buffers.bundledVrm,
+    });
+    framing = applyMeasuredFraming(
+      vrm.scene,
+      { kind: "footprint", value: computeInsetFootprint(reference.footprint) },
+      { targetBottom: reference.boundsBottom + IMPORTED_MODEL_VERTICAL_OFFSET }
+    );
+  }
+  // `applyMeasuredFraming` a deja positionne le modele ; on fige l'etat.
+  vrm.scene.scale.copy(framing.finalScale);
+  vrm.scene.position.copy(framing.finalPosition);
+  const alignOffset = framing.finalPosition.clone();
 
-  // Pieds du modele a la hauteur des pieds du lobster, centre X/Z aligne.
-  const finalSizeY = nativeSize.y * scale;
-  const desiredCenter = new THREE.Vector3(
-    baseline.center.x,
-    baseline.minY + finalSizeY / 2,
-    baseline.center.z
-  );
-  const scaledCenter = nativeCenter.clone().multiplyScalar(scale);
-  const alignOffset = desiredCenter.clone().sub(scaledCenter);
-  vrm.scene.position.copy(alignOffset);
-
-  const camCenter = new THREE.Vector3(
-    baseline.center.x,
-    baseline.center.y,
-    baseline.center.z
-  );
+  // Camera FIXE, derivee de REF_MAX_AXIS — aucune mesure du modele affiche.
+  const camTarget = new THREE.Vector3(0, REF_MAX_AXIS * 0.45, 0);
   const fillDistance =
-    baseline.halfMaxDim / Math.tan((camera.fov * Math.PI) / 360);
+    REF_MAX_AXIS / 2 / Math.tan((camera.fov * Math.PI) / 360);
   camera.position.set(
-    camCenter.x,
-    camCenter.y + baseline.height * CAM_PIVOT_OFFSET_Y_FACTOR,
-    camCenter.z + fillDistance * CAM_FILL_DISTANCE_FACTOR
+    camTarget.x,
+    camTarget.y + REF_MAX_AXIS * CAM_PIVOT_OFFSET_Y_FACTOR,
+    fillDistance * CAM_FILL_DISTANCE_FACTOR
   );
-  camera.lookAt(camCenter);
+  camera.lookAt(camTarget);
   // Cadrage de reference : distance et direction figees, le zoom (pose) ne
   // fait que diviser la distance. La camera ne change plus d'orientation.
-  const cameraCenter = camCenter.clone();
+  const cameraCenter = camTarget.clone();
   const cameraDistance = camera.position.distanceTo(cameraCenter);
   const cameraDirection = camera.position.clone().sub(cameraCenter).normalize();
   // Orientation naturelle du modele (apres correction VRM 0.x) : les yaws
@@ -458,15 +490,20 @@ export async function startPreviewRuntime(
   // Zoom et profondeur courants (pose) ; bornes partagees avec la validation.
   let zoom = 1;
   let depth = 0;
-  // Geste 4.5 : coins de la bbox de l'avatar, projetes a la demande (la zone
-  // suit le zoom, contrairement a un cache fige au cadrage initial). La bbox
-  // est relevee APRES l'echelle + le positionnement.
-  const alignedBox = new THREE.Box3().setFromObject(vrm.scene);
+  // Geste 4.5 : coins de la bbox de l'avatar APRES cadrage (zone du geste).
+  const finalBounds = measureRenderableMeshBounds(vrm.scene);
+  const halfSize = finalBounds.size.clone().multiplyScalar(0.5);
   const bboxCorners: THREE.Vector3[] = [];
-  for (const x of [alignedBox.min.x, alignedBox.max.x]) {
-    for (const y of [alignedBox.min.y, alignedBox.max.y]) {
-      for (const z of [alignedBox.min.z, alignedBox.max.z]) {
-        bboxCorners.push(new THREE.Vector3(x, y, z));
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        bboxCorners.push(
+          new THREE.Vector3(
+            finalBounds.center.x + halfSize.x * sx,
+            finalBounds.center.y + halfSize.y * sy,
+            finalBounds.center.z + halfSize.z * sz
+          )
+        );
       }
     }
   }
@@ -505,10 +542,9 @@ export async function startPreviewRuntime(
   const alcoveScene = (alcoveGltf as { scene: THREE.Group }).scene;
   // L'alcove suit la MEME echelle/position que le modele cadre (comportement
   // du /hologram Desktop : `environmentScale`/`environmentPosition` =
-  // `framing.finalScale`/`finalPosition`). Pour le lobster (scale 1, position
-  // 0) l'alcove reste a son echelle native — le ratio d'origine est preserve.
-  alcoveScene.scale.setScalar(scale);
-  alcoveScene.position.copy(alignOffset);
+  // `framing.finalScale`/`finalPosition`).
+  alcoveScene.scale.copy(framing.finalScale);
+  alcoveScene.position.copy(framing.finalPosition);
   scene.add(alcoveScene);
 
   /** Applique un zoom contraint et repositionne la camera (distance seule). */
