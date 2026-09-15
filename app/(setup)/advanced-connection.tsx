@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useConnectionStore } from '../../stores/connectionStore';
@@ -45,6 +45,9 @@ export default function AdvancedConnectionScreen() {
   const [hotspotPort, setHotspotPort] = useState('8080');
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
+  // Œil du champ mot de passe (même pattern que l'ECRAN 2 de /connect) :
+  // show/hide local, jamais persisté.
+  const [showPassword, setShowPassword] = useState(false);
 
   /** Valide la saisie, enregistre les coordonnees et ping le Desktop. */
   async function onTest(): Promise<void> {
@@ -109,7 +112,7 @@ export default function AdvancedConnectionScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.content}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Connexion avancée</Text>
         <Text style={styles.label}>Adresse du Desktop (IPv4)</Text>
         <TextInput
@@ -171,17 +174,28 @@ export default function AdvancedConnectionScreen() {
           autoCorrect={false}
           accessibilityLabel="SSID du WiFi cible"
         />
-        <TextInput
-          style={styles.input}
-          value={wifiPassword}
-          onChangeText={setWifiPassword}
-          placeholder="Mot de passe WiFi cible (vide si ouvert)"
-          placeholderTextColor="#9ca3af"
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          accessibilityLabel="Mot de passe du WiFi cible"
-        />
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={styles.passwordInput}
+            value={wifiPassword}
+            onChangeText={setWifiPassword}
+            placeholder="Mot de passe WiFi cible (vide si ouvert)"
+            placeholderTextColor="#9ca3af"
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry={!showPassword}
+            accessibilityLabel="Mot de passe du WiFi cible"
+          />
+          <Pressable
+            style={styles.eyeButton}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+            hitSlop={8}
+            onPress={() => setShowPassword((v) => !v)}
+          >
+            <Text style={styles.eyeGlyph}>{showPassword ? '🙈' : '👁'}</Text>
+          </Pressable>
+        </View>
         <Pressable
           style={[styles.secondaryButton, checking && styles.buttonDisabled]}
           accessibilityRole="button"
@@ -219,14 +233,17 @@ export default function AdvancedConnectionScreen() {
         >
           <Text style={styles.forgetText}>Relancer l'appairage</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 24 },
+  // flexGrow (pas flex:1) dans contentContainerStyle : flex:1 fige la hauteur
+  // du contenu à celle du viewport et désactive le scroll (leçon 15/09).
+  content: { flexGrow: 1, padding: 24 },
+  scroll: { flex: 1 },
   title: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 12 },
   label: {
     fontSize: 14,
@@ -236,6 +253,24 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   section: { marginTop: 24 },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 10,
+    backgroundColor: '#f9fafb',
+    marginBottom: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#111827',
+  },
+  eyeButton: { paddingHorizontal: 12, paddingVertical: 10 },
+  eyeGlyph: { fontSize: 18, color: '#6b7280' },
   input: {
     borderWidth: 1,
     borderColor: '#d1d5db',
