@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { hasProvisioningStatus } from '../../lib/network/deviceClient';
@@ -95,7 +95,7 @@ export default function ConnectScreen() {
   if (phase === 'wifiForm') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Votre WiFi</Text>
           <Text style={styles.hint}>
             Dites à l'appliance quel WiFi rejoindre. Le mot de passe est
@@ -154,7 +154,7 @@ export default function ConnectScreen() {
           >
             <Text style={styles.linkText}>Relancer la recherche</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -162,7 +162,7 @@ export default function ConnectScreen() {
   if (phase === 'switching' || phase === 'sending') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Connexion en cours</Text>
           <ActivityIndicator color="#4a90d9" style={styles.activity} />
           <Text style={styles.hint}>
@@ -195,7 +195,7 @@ export default function ConnectScreen() {
           >
             <Text style={styles.linkText}>Annuler l'appairage</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -203,7 +203,7 @@ export default function ConnectScreen() {
   if (phase === 'connected') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.statusCard}>
             <Text style={styles.statusOk}>Appliance appariée ✓</Text>
           </View>
@@ -221,7 +221,7 @@ export default function ConnectScreen() {
           >
             <Text style={styles.linkText}>Paramètres avancés (IP / port)</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -229,7 +229,7 @@ export default function ConnectScreen() {
   if (phase === 'failed') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Connexion non établie</Text>
           <Text style={styles.error}>{lastError ?? 'Erreur inconnue.'}</Text>
           <Pressable
@@ -246,7 +246,7 @@ export default function ConnectScreen() {
           >
             <Text style={styles.linkText}>Refaire l'appairage</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -255,7 +255,7 @@ export default function ConnectScreen() {
   const discovering = phase === 'discovering' || phase === 'idle';
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {discovering ? (
           <>
             <Text style={styles.title}>Recherche de l'appliance…</Text>
@@ -291,7 +291,7 @@ export default function ConnectScreen() {
             </Pressable>
           </>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
