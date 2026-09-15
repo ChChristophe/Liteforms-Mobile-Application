@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,32 +12,38 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConfigStore } from '../../stores/configStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { fetchVrmList } from '../../lib/network/deviceClient';
+import {
+  clearResidentVrm,
+  saveResidentVrmMeta,
+} from '../../lib/storage/residentVrm';
+import {
+  startVrmDownload,
+  type VrmDownloadTask,
+} from '../../lib/network/vrmDownload';
 import type { VrmSummary } from '../../types/device';
 
 /**
- * Ecran de selection du modele VRM (Phase 3 etape 5, decision D2 ajustee).
+ * Ecran de selection du modele VRM (Phase 3 etape 5 + Phase 5, decision D2).
  *
- * Etat actuel : si un Desktop est connecte (connectionStore), la
- * bibliothèque reelle `GET /api/poc/vrms` (Phase C) est affichee et
- * selectionnable ; sinon la reference `{id, fileName, hash}` reste editable
- * a la main (fallback hors ligne, POC utilisable sans Desktop).
+ * Si un Desktop est connecte (connectionStore), la bibliothèque reelle
+ * `GET /api/device/vrms` est affichee ; selectionner un VRM du catalogue
+ * TELECHARGE le binaire Desktop -> telephone (D2, 15/09/2026) avec barre de
+ * progression, puis met a jour `modelRef {id, fileName, hash: md5}` :
+ * - le binaire resident REMPLACE le precedent (un seul resident a la fois,
+ *   ecriture atomique `.part` → renommage, cf. `lib/storage/residentVrm`) ;
+ * - le preview natif charge le resident a chaud (expressions mood
+ *   affichables en preview avant l'envoi, raison du D2) ;
+ * - echec : message clair + retenter (jamais de modelRef partiel mis a jour,
+ *   jamais de crash) ; annulation au demontage (cancelAsync + purge `.part`).
  *
- * Comportement final voulu (D2 ajustee, reporte) : selection dans le
- * catalogue du Desktop puis telechargement Desktop -> Mobile ; le VRM
- * telecharge remplace celui en place (un seul VRM resident sur le
- * telephone, contrainte de stockage).
- *
- * Champs :
- * - `id` : identifiant stable dans le catalogue Desktop (obligatoire) ;
- * - `fileName` : nom de fichier a des fins d'affichage (obligatoire) ;
- * - `hash` : lecture seule pour l'instant, servi par le contrat Desktop
- *   (D2/D4) ; `null` tant que le protocole ne l'exige pas.
+ * Selection builtin : PAS de telechargement (le bundle est deja resident) ;
+ * le resident eventuel est purge pour rester « un seul resident ».
+ * Hors connexion : la reference `{id, fileName, hash}` reste editable a la
+ * main (fallback hors ligne, POC utilisable sans Desktop).
  *
  * Validation : modelRef vide est refuse par `validateDeviceConfig`,
  * donc la persistance saute tant qu'un des deux champs est vide —
  * l'utilisateur voit l'erreur de champ correspondante.
- *
- * Au demontage : le store conserve la derniere reference valide.
  */
 /** Taille lisible en Mo (une decimale). */
 function formatMo(sizeBytes: number): string {
@@ -56,6 +62,26 @@ export default function VrmSelectScreen() {
   const [vrms, setVrms] = useState<VrmSummary[] | null>(null);
   const [vrmsLoading, setVrmsLoading] = useState(false);
   const [vrmsError, setVrmsError] = useState<string | null>(null);
+  /** Telechargement en cours : nom + fraction de progression (throttle 10 %). */
+  const [downloading, setDownloading] = useState<{
+    fileName: string;
+    progress: number | null;
+  } | null>(null);
+  /** Echec visible du dernier telechargement tente (fileName + raison). */
+  const [downloadError, setDownloadError] = useState<{
+    fileName: string;
+    message: string;
+  } | null>(null);
+  /** Tache en cours : annulee au demontage (cancelAsync + purge .part). */
+  const taskRef = useRef<VrmDownloadTask | null>(null);
+
+  useEffect(
+    () => () => {
+      void taskRef.current?.cancel();
+      taskRef.current = null;
+    },
+    []
+  );
 
   // Au montage : charge la bibliotheque VRM reelle du Desktop connecte.
   // Site non connecte ou erreur : la reference manuelle reste utilisable.
@@ -78,12 +104,64 @@ export default function VrmSelectScreen() {
     };
   }, [connectedDesktop, host, port]);
 
-  /** Selection dans le catalogue : modelRef {id, fileName, hash: null} (D2). */
+  /**
+   * Selection dans le catalogue. Non-builtin : telecharge Desktop -> Mobile
+   * (progression throtlee cote download, <= 10 setState par fichier), puis
+   * resident remplacé (atomique) et modelRef {id, fileName, hash: md5}.
+   */
   function selectVrm(vrm: VrmSummary): void {
     setIdError(null);
     setFileNameError(null);
-    updateAvatar({
-      modelRef: { id: vrm.id, fileName: vrm.fileName, hash: null },
+    setDownloadError(null);
+    if (vrm.builtin === true) {
+      // Modele integre : deja resident en bundle, rien a telecharger (D2) ;
+      // le resident Desktop eventuel est purge (un seul resident, D2).
+      taskRef.current = null;
+      void clearResidentVrm();
+      updateAvatar({
+        modelRef: { id: vrm.id, fileName: vrm.fileName, hash: null },
+      });
+      return;
+    }
+    if (connectedDesktop === null || host === null || port === null) {
+      setDownloadError({
+        fileName: vrm.fileName,
+        message: 'Desktop non connecté : téléchargement impossible.',
+      });
+      return;
+    }
+    const task = startVrmDownload(host, port, vrm.fileName, (progress) => {
+      // Throttle amont (paliers 10 %) : <= 10 re-renders par fichier.
+      setDownloading({ fileName: vrm.fileName, progress });
+    });
+    taskRef.current = task;
+    setDownloading({ fileName: vrm.fileName, progress: null });
+    void task.promise.then((result) => {
+      taskRef.current = null;
+      setDownloading(null);
+      if (!result.ok) {
+        if (result.cancelled) return; // demontage : ni erreur ni modelRef
+        setDownloadError({ fileName: vrm.fileName, message: result.error });
+        return;
+      }
+      void (async () => {
+        try {
+          await saveResidentVrmMeta({
+            fileName: vrm.fileName,
+            hash: result.md5,
+          });
+        } catch (error) {
+          if (__DEV__) console.warn('[vrm-select] resident meta failed', error);
+          setDownloadError({
+            fileName: vrm.fileName,
+            message: 'Échec de la sauvegarde locale du VRM.',
+          });
+          return;
+        }
+        updateAvatar({
+          modelRef: { id: vrm.id, fileName: vrm.fileName, hash: result.md5 },
+        });
+      })();
     });
   }
 
@@ -138,23 +216,60 @@ export default function VrmSelectScreen() {
         {vrms !== null &&
           vrms.length > 0 &&
           vrms.map((vrm) => {
-            const selected = vrm.fileName === modelRef.fileName;
+            const selected =
+              vrm.fileName === modelRef.fileName &&
+              downloading?.fileName !== vrm.fileName;
+            const isDownloading = downloading?.fileName === vrm.fileName;
+            const hasError = downloadError?.fileName === vrm.fileName;
             return (
-              <Pressable
-                key={vrm.id}
-                style={[styles.card, selected && styles.cardSelected]}
-                onPress={() => selectVrm(vrm)}
-                accessibilityLabel={`Sélectionner le modèle ${vrm.fileName}`}
-              >
-                <Text style={styles.cardTitle}>
-                  {vrm.fileName}
-                  {vrm.builtin === true ? ' (intégré)' : ''}
-                </Text>
-                <Text style={styles.cardText}>
-                  id : {vrm.id} · {formatMo(vrm.sizeBytes)}
-                  {selected ? ' · sélectionné' : ''}
-                </Text>
-              </Pressable>
+              <View key={vrm.id}>
+                <Pressable
+                  style={[styles.card, selected && styles.cardSelected]}
+                  onPress={() => selectVrm(vrm)}
+                  disabled={isDownloading}
+                  accessibilityLabel={`Sélectionner le modèle ${vrm.fileName}`}
+                >
+                  <Text style={styles.cardTitle}>
+                    {vrm.fileName}
+                    {vrm.builtin === true ? ' (intégré)' : ''}
+                  </Text>
+                  <Text style={styles.cardText}>
+                    id : {vrm.id} · {formatMo(vrm.sizeBytes)}
+                    {selected ? ' · sélectionné' : ''}
+                  </Text>
+                  {isDownloading && (
+                    <View
+                      style={styles.progressTrack}
+                      accessibilityLabel={
+                        'Téléchargement du modèle ' + vrm.fileName
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${Math.round((downloading?.progress ?? 0) * 100)}%` },
+                        ]}
+                      />
+                    </View>
+                  )}
+                  {isDownloading && (
+                    <Text style={styles.cardText}>
+                      Téléchargement…
+                      {downloading?.progress !== null
+                        ? ` ${Math.round((downloading?.progress ?? 0) * 100)} %`
+                        : ''}
+                    </Text>
+                  )}
+                </Pressable>
+                {hasError && !isDownloading && (
+                  <Text style={styles.error}>
+                    Téléchargement échoué ({downloadError?.message}) —{' '}
+                    <Text onPress={() => selectVrm(vrm)} style={styles.retry}>
+                      Retenter
+                    </Text>
+                  </Text>
+                )}
+              </View>
             );
           })}
 
@@ -187,12 +302,11 @@ export default function VrmSelectScreen() {
         <Text style={styles.error}>{fileNameError}</Text>
 
         <Text style={styles.note}>
-          Pour l'instant, seule la référence est éditable ici ; le modèle par
-          défaut (lobsterEdit.vrm) est intégré à l'application pour le
-          preview. Comportement visé (D2, reporté) : sélectionner un VRM du
-          catalogue du Desktop et le télécharger depuis le poste — le VRM
-          téléchargé remplacera celui en place, un seul résident à la fois
-          sur le téléphone.
+          Sélectionner un VRM du catalogue le télécharge depuis le Desktop
+          vers ce téléphone pour le preview — le binaire prévaut sur le
+          modèle intégré et remplace le résident précédent (un seul à la
+          fois). L'envoi au Desktop reste une référence{' '}
+          {'{id, fileName, hash}'}, jamais le binaire (D2).
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -251,6 +365,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#dc2626',
     marginTop: 6,
+  },
+  retry: {
+    color: '#dc2626',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  progressTrack: {
+    marginTop: 8,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#2563eb',
   },
   note: {
     marginTop: 32,

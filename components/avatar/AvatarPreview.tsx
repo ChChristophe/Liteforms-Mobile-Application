@@ -31,6 +31,10 @@ import {
   loadBundledAssetBuffer,
   purgeTextureCache,
 } from '../../lib/avatar/nativeTextureSupport';
+import {
+  loadResidentVrm,
+  useResidentVrmVersion,
+} from '../../lib/storage/residentVrm';
 import { startPreviewRuntime, type PreviewHandle } from '../../lib/avatar/previewRuntime';
 
 /** Etats UI du preview : statique, recycle l'ecran, jamais par frame. */
@@ -95,6 +99,13 @@ export const AvatarPreview = memo(function AvatarPreview({
   const pose = useConfigStore((state) => state.config.avatar.pose);
   const [retryCounter, setRetryCounter] = useState(0);
   const [status, setStatus] = useState<PreviewStatus>({ kind: 'loading' });
+  /**
+   * D2 : avertissement non fatal (resident illisible → modèle intégré
+   * affiché). Visible en état ready, jamais un écran noir.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** Incrémenté par lib/storage/residentVrm à chaque remplacement du résident. */
+  const residentVersion = useResidentVrmVersion();
 
   /** Runtime courant ; nul tant que non charge, null apres dispose. */
   const runtimeRef = useRef<PreviewHandle | null>(null);
@@ -197,14 +208,16 @@ export const AvatarPreview = memo(function AvatarPreview({
       const generation = ++loadGenerationRef.current;
       const isCurrent = () => generation === loadGenerationRef.current;
       setStatus({ kind: 'loading' });
+      setNotice(null);
       const startedAt = Date.now();
       onStage?.('context');
       const uninstallTextureSupport = installNativeTextureSupport();
       try {
-        const [vrm, alcove, animation] = await Promise.all([
-          loadBundledAssetBuffer(
-            require('../../assets/models/lobsterEdit.vrm')
-          ),
+        // D2 : le résident (téléchargé Desktop -> Mobile) est préféré au
+        // bundle quand il existe et est valide ; sinon fallback bundle,
+        // avertissement visible si un résident était attendu (jamais crash).
+        const [resident, alcove, animation] = await Promise.all([
+          loadResidentVrm(),
           loadBundledAssetBuffer(
             require('../../assets/models/Alcove.glb')
           ),
@@ -212,6 +225,15 @@ export const AvatarPreview = memo(function AvatarPreview({
             require('../../assets/animations/idle_loop.vrma')
           ),
         ]);
+        // Fallback bundle si le résident est absent : réservé au builtin
+        // (resident === bundle équivalent, donc pas un downgrade).
+        const vrm =
+          resident.status === 'resident'
+            ? resident.buffer
+            : await loadBundledAssetBuffer(
+                require('../../assets/models/lobsterEdit.vrm')
+              );
+        if (resident.status === 'invalid') setNotice(resident.message);
         if (!isCurrent()) return;
         onStage?.('assets');
         const runtime = await startPreviewRuntime(gl, width, height, {
@@ -282,7 +304,8 @@ export const AvatarPreview = memo(function AvatarPreview({
   useEffect(() => releaseAll, [releaseAll]);
 
   // Rechargement runtime sans remonter le GLView (4.2, fallback choisi
-  // apres preuve device) : changement de modele ou reloadSignal increment.
+  // apres preuve device) : changement de modele, resident remplace (D2)
+  // ou reloadSignal increment.
   const firstSyncRef = useRef(true);
   useEffect(() => {
     // Le premier rendu est couvert par onContextCreate.
@@ -295,7 +318,7 @@ export const AvatarPreview = memo(function AvatarPreview({
     if (gl === null || width === 0) return;
     teardownRuntime();
     void loadScene(gl, width, height);
-  }, [modelRefId, reloadSignal, teardownRuntime, loadScene]);
+  }, [modelRefId, residentVersion, reloadSignal, teardownRuntime, loadScene]);
 
   /**
    * Geste 4.5 : pan horizontal. Cible decidee AU DEBUT du drag — point dans
@@ -417,6 +440,11 @@ export const AvatarPreview = memo(function AvatarPreview({
               void loadScene(gl, gl.drawingBufferWidth, gl.drawingBufferHeight);
             }}
           />
+          {notice !== null && status.kind === 'ready' && (
+            <View style={styles.noticeBanner} pointerEvents="none">
+              <Text style={styles.noticeText}>{notice}</Text>
+            </View>
+          )}
           {status.kind !== 'ready' && (
             <View style={styles.overlay}>
               {status.kind === 'loading' ? (
@@ -558,6 +586,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.7)',
+  },
+  noticeBanner: {
+    position: 'absolute',
+    top: 8,
+    left: 12,
+    right: 12,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(250, 204, 21, 0.85)',
+  },
+  noticeText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#111827',
   },
   errorText: {
     fontSize: 14,

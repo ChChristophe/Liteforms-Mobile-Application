@@ -469,6 +469,35 @@ terrain :
   inchangé ; le telechargement Desktop -> Mobile pour le preview reste la
   cible non modifiee de la presente decision D2.
 
+#### Statut D2 — 15/09/2026 : telechargement Desktop -> Mobile implements
+
+La deuxieme moitie de D2 est implementee (contrat inchangé, aucune route
+Desktop modifiee) :
+
+* `lib/network/vrmDownload.ts` : `startVrmDownload(host, port, fileName,
+  onProgress)` — `expo-file-system/legacy` SDK 57 (`createDownloadResumable`,
+  progression native + `cancelAsync`), `name` valide LOCALEMENT contre
+  `^[A-Za-z0-9][A-Za-z0-9._-]*\.vrm$` avant formation de l'URL (anti path
+  traversal), progression throtlee (paliers 10 %, au plus 10 callbacks UI
+  par fichier, etat indetermine si Content-Length absent) ;
+* `lib/storage/residentVrm.ts` : UN SEUL resident, chemin fixe
+  `<documentDirectory>/liteforms-resident.vrm`, ecriture atomique `.part`
+  puis `moveAsync` (renommage) — jamais un fichier a moitie ecrit visible
+  du preview ; metadata only (fileName, md5) en AsyncStorage
+  `liteforms.residentVrm`, le binaire ne vit JAMAIS en AsyncStorage ;
+* preview : `AvatarPreview.loadScene` prefere le resident quand il est
+  present et valide (magic `glTF` verifie) ; resident absent ou au nom du
+  bundle (`lobsterEdit.vrm`) → modele integre ; resident illisible →
+  fallback integre + avertissement visible (bandeau), jamais un ecran noir ;
+  rechargement runtime sur le meme contexte GL, declenche par un compteur
+  de version (`useResidentVrmStore`) — pas de remontage GLView ;
+* `vrm-select.tsx` : selection catalogue = telechargement (barre de
+  progression, echec affiche + Retenter, annulation + purge `.part` au
+  demontage) ; selection builtin = pas de telechargement + purge du
+  resident ; la saisie manuelle hors ligne reste disponible ;
+* `modelRef {id, fileName, hash: md5}` alimente desormais `hash` (md5
+  calcule nativement au telechargement), sans changement du contrat.
+
 ### D3 — Connexion initiale
 
 Decision produit — 10/09/2026 : **Option A, provisioning par hotspot
@@ -1298,6 +1327,24 @@ la selection met a jour `modelRef {id, fileName, hash: null}` et le Desktop
 applique le modele a chaud — valide sur le terrain (cf. statut D2 du
 12/09 et statut Phase 6 du 12/09). Reste de la phase : telechargement
 Desktop -> Mobile pour le preview natif (cible D2 inchangee).
+
+#### Statut Phase 5 — 15/09/2026 : telechargement resident FAIT
+
+La phase se ferme (cf. statut D2 du 15/09) :
+
+* `startVrmDownload` (contrat `GET /api/device/vrms/file`) telecharge le
+  binaire Desktop -> resident local, avec progression throtlee, echec
+  affiche + Retenter, annulation au demontage, ecriture atomique
+  (`.part` → `moveAsync`) — binaire uniquement en FileSystem ;
+* preview : resident valide prefere au bundle (`chaleur a chaud`), magic
+  `glTF` verifie avant usage ; resident illisible/corrompu → fallback
+  modele integre + avertissement visible — le gate « un modele invalide ne
+  fait pas planter GLTFLoader » est respecte (verification unitaire ;
+  corruption profonde au-dela du magic → erreur affichable + retry, regle
+  Phase 4) ;
+* la selection et le resident survivent au relancement (metadata
+  AsyncStorage + documentDirectory) ; le Desktop et le Mobile partagent le
+  meme identificateur (`modelRef {id, fileName, hash: md5}`).
 
 ---
 
