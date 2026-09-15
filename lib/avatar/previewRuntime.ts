@@ -279,11 +279,6 @@ const FALLBACK_LOBSTER_REFERENCE: LobsterReference = {
 // --- Calibration (bundle lobster, une fois par session) -------------------
 let bundledVrmBufferPromise: Promise<ArrayBuffer> | null = null;
 let lobsterReference: LobsterReference | null = null;
-/** Aspect caméra figé sur le PREMIER chargement : l'alcove et le modèle
- * s'affichent identiquement quel que soit l'aspect transitoire du GLView
- * (letterbox vers cet aspect). `null` tant que le premier runtime n'est pas
- * monté. */
-let sessionAspect: number | null = null;
 
 /** Resultat de parse pour la mesure (injectable en test). */
 type ParsedVrmScene = { scene: THREE.Object3D; vrm: VRM | null };
@@ -372,28 +367,6 @@ export function getBundledVrmBuffer(
 export function resetVrmCalibration(): void {
   bundledVrmBufferPromise = null;
   lobsterReference = null;
-  sessionAspect = null;
-}
-
-/** Viewport letterbox : rectangle centré d'aspect `aspect` dans un buffer
- * `bufferW × bufferH` (bars remplies par la couleur de fond). */
-function computeLetterbox(
-  bufferW: number,
-  bufferH: number,
-  aspect: number
-): { x: number; y: number; width: number; height: number } {
-  if (!(bufferW > 0) || !(bufferH > 0) || !(aspect > 0)) {
-    return { x: 0, y: 0, width: bufferW, height: bufferH };
-  }
-  const bufferAspect = bufferW / bufferH;
-  if (bufferAspect > aspect) {
-    // Buffer plus large que l'aspect cible : bars gauche/droite.
-    const width = bufferH * aspect;
-    return { x: (bufferW - width) / 2, y: 0, width, height: bufferH };
-  }
-  // Buffer plus étroit (ou égal) : bars haut/bas.
-  const height = bufferW / aspect;
-  return { x: 0, y: (bufferH - height) / 2, width: bufferW, height };
 }
 
 /**
@@ -427,25 +400,9 @@ export async function startPreviewRuntime(
   disposables.push(renderer);
 
   const scene = new THREE.Scene();
-  // Aspect caméra FIXÉ sur le premier chargement (session) : le GLView
-  // expo-gl peut avoir un aspect transitoire différent d'un montage à l'autre
-  // (0.83 vs 0.75 observé) — on fige l'aspect et on letterbox le rendu vers
-  // cet aspect, si bien que l'alcove/le modèle s'affichent IDENTIQUEMENT.
-  const aspect = sessionAspect ?? width / height;
-  if (sessionAspect === null) sessionAspect = aspect;
-  const camera = new THREE.PerspectiveCamera(30, aspect, 0.1, 20);
+  const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 20);
   camera.position.set(0, 1.3, 1.8);
   camera.lookAt(0, 1.0, 0);
-
-  // Letterbox : viewport centré d'aspect fixe dans le buffer réel.
-  const applyLetterbox = (bufferW: number, bufferH: number): void => {
-    const lb = computeLetterbox(bufferW, bufferH, aspect);
-    renderer.setViewport(lb.x, lb.y, lb.width, lb.height);
-    renderer.setScissor(lb.x, lb.y, lb.width, lb.height);
-  };
-  applyLetterbox(width, height);
-  renderer.setScissorTest(true);
-  renderer.setClearColor("#0b1120", 1);
 
   // Eclairage reference Web (`AvatarScene`) : ambiant chaud + key light fort
   // + fill teinte. MToon (three-vrm) lit la premiere DirectionalLight pour le
@@ -533,20 +490,33 @@ export async function startPreviewRuntime(
   vrm.scene.position.copy(framing.finalPosition);
   const alignOffset = framing.finalPosition.clone();
 
-  // Camera FIXE, derivee de REF_MAX_AXIS — aucune mesure du modele affiche.
-  const camTarget = new THREE.Vector3(0, REF_MAX_AXIS * 0.45, 0);
-  const fillDistance =
-    REF_MAX_AXIS / 2 / Math.tan((camera.fov * Math.PI) / 360);
+  // Camera cadre sur l'EMPREINTE de l'alcove (constante), en tenant compte
+  // de l'aspect reel du buffer : la distance est pilotee par la LARGEUR de
+  // l'alcove. Comme la largeur du buffer (telephone) est constante, l'alcove
+  // occupe une taille en PIXELS constante quel que soit l'aspect du GLView
+  // (fix « alcove qui change de taille » — le letterbox ne fixait que
+  // l'aspect, pas la taille en pixels).
+  const alcoveFootprint = environmentReference.footprint;
+  const tanHalf = Math.tan((camera.fov * Math.PI) / 360);
+  const halfHFov = Math.atan(tanHalf * (width / height));
+  const distV = alcoveFootprint.height / 2 / tanHalf;
+  const distH = alcoveFootprint.width / 2 / Math.tan(halfHFov);
+  const camDistance = Math.max(distV, distH) * CAM_FILL_DISTANCE_FACTOR;
+  const camTarget = new THREE.Vector3(
+    0,
+    environmentReference.boundsBottom + alcoveFootprint.height / 2,
+    0
+  );
   camera.position.set(
     camTarget.x,
-    camTarget.y + REF_MAX_AXIS * CAM_PIVOT_OFFSET_Y_FACTOR,
-    fillDistance * CAM_FILL_DISTANCE_FACTOR
+    camTarget.y + alcoveFootprint.height * CAM_PIVOT_OFFSET_Y_FACTOR,
+    camDistance
   );
   camera.lookAt(camTarget);
   // Cadrage de reference : distance et direction figees, le zoom (pose) ne
   // fait que diviser la distance. La camera ne change plus d'orientation.
   const cameraCenter = camTarget.clone();
-  const cameraDistance = camera.position.distanceTo(cameraCenter);
+  let cameraDistance = camera.position.distanceTo(cameraCenter);
   const cameraDirection = camera.position.clone().sub(cameraCenter).normalize();
   // Orientation naturelle du modele (apres correction VRM 0.x) : les yaws
   // de pose sont RELATIFS a cette base (portable sur tout VRM).
@@ -657,10 +627,6 @@ export async function startPreviewRuntime(
       if (disposed) return;
       mixer?.update(deltaSeconds);
       vrm.update(deltaSeconds);
-      // Efface tout le buffer (bars du letterbox) puis rend dans le viewport.
-      renderer.setScissorTest(false);
-      renderer.clear();
-      renderer.setScissorTest(true);
       renderer.render(scene, camera);
       // Presente la framebuffer expo-gl (swap buffers equivalent, docs GLView).
       gl.endFrameEXP();
@@ -743,10 +709,17 @@ export async function startPreviewRuntime(
     },
     resize(width, height) {
       if (disposed || width <= 0 || height <= 0) return;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
-      // L'aspect caméra reste FIXÉ (aspect de session) : on recalcule
-      // seulement le viewport letterbox dans le nouveau buffer.
-      applyLetterbox(width, height);
+      // Recalcule la distance caméra pour que l'alcove garde une LARGEUR
+      // en pixels constante, puis reapplique le zoom courant.
+      const tan = Math.tan((camera.fov * Math.PI) / 360);
+      const halfH = Math.atan(tan * camera.aspect);
+      const dV = alcoveFootprint.height / 2 / tan;
+      const dH = alcoveFootprint.width / 2 / Math.tan(halfH);
+      cameraDistance = Math.max(dV, dH) * CAM_FILL_DISTANCE_FACTOR;
+      applyZoom(zoom);
     },
     dispose() {
       if (disposed) return;
