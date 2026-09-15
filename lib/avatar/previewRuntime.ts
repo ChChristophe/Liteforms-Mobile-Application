@@ -163,30 +163,51 @@ function disposeSceneResources(scene: THREE.Object3D | null): void {
   });
 }
 
-/** Baseline d'un scene parse : hauteur debout + demi-max-dimension, null si bbox degeneresce. */
-function sceneBaseline(
-  scene: THREE.Object3D
-): { height: number; halfMaxDim: number } | null {
+/** Baseline d'une scene parse : boite englobante normalisee (lobster). */
+export type VrmBaseline = {
+  /** Hauteur debout (bboxSize.y). */
+  height: number;
+  /** Demi-plus-grand-axe de la bbox (cadrage camera, bras inclus). */
+  halfMaxDim: number;
+  /** Centre de la bbox — cible camera ET alignement du modele affiche. */
+  center: { x: number; y: number; z: number };
+  /** Pieds (bbox.min.y) — ancre de l'alcove. */
+  minY: number;
+};
+
+/** Fallback si la mesure du lobster echoue (buffer illisible). */
+const FALLBACK_BASELINE: VrmBaseline = {
+  height: TARGET_VRM_HEIGHT,
+  halfMaxDim: TARGET_VRM_HEIGHT / 2,
+  center: { x: 0, y: TARGET_VRM_HEIGHT / 2, z: 0 },
+  minY: 0,
+};
+
+function sceneBaseline(scene: THREE.Object3D): VrmBaseline | null {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  return size.y > 0 && maxDim > 0
-    ? { height: size.y, halfMaxDim: maxDim / 2 }
-    : null;
+  if (!(size.y > 0) || !(maxDim > 0)) return null;
+  const center = box.getCenter(new THREE.Vector3());
+  return {
+    height: size.y,
+    halfMaxDim: maxDim / 2,
+    center: { x: center.x, y: center.y, z: center.z },
+    minY: box.min.y,
+  };
 }
+
 // --- Calibration baseline (bundle lobster, une fois par session) ----------
-// Etat MODULE : le buffer bundle et sa baseline camera vivent une fois par
-// session d'app (un reload runtime ne recharge ni ne remesure rien).
+// Etat MODULE : le buffer bundle et sa baseline (boite entiere) vivent une
+// fois par session d'app. Le lobster n'est JAMAIS rescale : sa bbox EST le
+// cadrage de reference. Tout autre VRM est (1) normalise a sa hauteur puis
+// (2) translate pour que son centre coincide avec celui du lobster — la
+// camera et l'alcove deviennent des constantes absolues, independantes du
+// modele affiche (incidents 15/09 v1..v4 : toute mesure du VRM affiche
+// faisait varier le zoom/le calage).
 
 let bundledVrmBufferPromise: Promise<ArrayBuffer> | null = null;
-let bundledVrmHeight: number | null = null;
-/**
- * Demi-plus-grand-axe de la bbox du lobster parsé (rotateVRM0 appliqué).
- * Deuxième composante de la baseline camera : le lobster n'est JAMAIS
- * rescale, donc sa bbox EST le cadrage baseline (incident 15/09 v3 : toute
- * mesure derivee du VRM affiche fait varier le zoom selon le modele).
- */
-let bundledVrmHalfMaxDim: number | null = null;
+let bundledVrmBaseline: VrmBaseline | null = null;
 
 /** Resultat de parse pour la mesure (injectable en test). */
 type ParsedVrmScene = { scene: THREE.Object3D; vrm: VRM | null };
@@ -203,15 +224,13 @@ async function parseVrmForMeasure(buffer: ArrayBuffer): Promise<ParsedVrmScene> 
 
 /**
  * Mesure la baseline d'un VRM depuis son buffer : parse jetable (geometrie
- * disposee, aucun rendu), `rotateVRM0` avant la mesure (même ordre que le
- * pipeline de preview, hauteur stable sur Y). Echec de parse -> null.
- * Renvoie { hauteur debout, demi-max-dimension de la bbox }, les DEUX
- * composantes de la baseline camera (incident 15/09 v3).
+ * disposee, aucun rendu), `rotateVRM0` avant la mesure (meme ordre que le
+ * pipeline, hauteur stable sur Y). Echec de parse -> null.
  */
 export async function measureVrmBaseline(
   buffer: ArrayBuffer,
   parse: (buffer: ArrayBuffer) => Promise<ParsedVrmScene> = parseVrmForMeasure
-): Promise<{ height: number; halfMaxDim: number } | null> {
+): Promise<VrmBaseline | null> {
   let parsed: ParsedVrmScene;
   try {
     parsed = await parse(buffer);
@@ -226,53 +245,27 @@ export async function measureVrmBaseline(
 }
 
 /**
- * Resolve la baseline de cadrage (cache module, une mesure par session,
- * aucune mesure par frame) :
- * - le bundle EST affiche : sa bbox native (mesuree du vrm deja parse,
- *   `nativeHeight`/`nativeHalfMaxDim`) devient la reference et est cachee —
- *   echelle 1, cadrage d'origine preserve ;
- * - un resident est affiche : cible = cache si present, sinon mesure
- *   PARESSEUSE du buffer bundle (`bundledVrm`) ; echec -> null (cache non
- *   pollue, la mesure est retentee au prochain reload runtime) ;
- * - sinon fallback historique `TARGET_VRM_HEIGHT` (baseline camera 0.5).
+ * Resout la baseline de cadrage (cache module, une mesure par session) :
+ * - bundle affiche : sa bbox native mesuree devient la reference (echelle 1) ;
+ * - resident affiche : cache si present, sinon mesure PARESSEUSE du buffer
+ *   bundle ; echec -> fallback (cache non pollue, retentee au reload) ;
+ * - retourne TOUJOURS une baseline (jamais null).
  */
-export async function resolveTargetVrmHeight(input: {
+export async function resolveVrmBaseline(input: {
   isBundledVrm: boolean;
-  /** Hauteur native du vrm affiche quand il EST le bundle (post-rotateVRM0). */
-  nativeHeight?: number | null;
-  /** Demi-max-dim native du vrm affiche quand il EST le bundle. */
-  nativeHalfMaxDim?: number | null;
-  /** Buffer bundle en cache, pour la mesure paresseuse si le cache est vide. */
+  nativeBaseline?: VrmBaseline | null;
   bundledVrm?: ArrayBuffer;
   parse?: (buffer: ArrayBuffer) => Promise<ParsedVrmScene>;
-}): Promise<number> {
-  if (input.isBundledVrm) {
-    if (input.nativeHeight != null) bundledVrmHeight = input.nativeHeight;
-    if (input.nativeHalfMaxDim != null) {
-      bundledVrmHalfMaxDim = input.nativeHalfMaxDim;
-    }
-  } else if (bundledVrmHeight === null && input.bundledVrm) {
+}): Promise<VrmBaseline> {
+  if (input.isBundledVrm && input.nativeBaseline) {
+    bundledVrmBaseline = input.nativeBaseline;
+  } else if (bundledVrmBaseline === null && input.bundledVrm) {
     const measured = await measureVrmBaseline(input.bundledVrm, input.parse);
     if (measured !== null) {
-      bundledVrmHeight = measured.height;
-      bundledVrmHalfMaxDim = measured.halfMaxDim;
+      bundledVrmBaseline = measured;
     }
   }
-  return bundledVrmHeight ?? TARGET_VRM_HEIGHT;
-}
-
-/**
- * Baseline camera pour le cadrage (incident 15/09 v3) : la distance est
- * derivee du demi-max-dimension du LOBSTER (cache), jamais du VRM affiche.
- * Fallback : hauteur/2 (VRM supposes normalises a la hauteur cible).
- */
-export function resolveBaselineHalfMaxDim(): number {
-  return bundledVrmHalfMaxDim ?? bundledVrmHeight ?? TARGET_VRM_HEIGHT / 2;
-}
-
-/** Hauteur baseline (lobster) pour les offsets camera — fallback 1.0. */
-export function resolveBaselineHeight(): number {
-  return bundledVrmHeight ?? TARGET_VRM_HEIGHT;
+  return bundledVrmBaseline ?? FALLBACK_BASELINE;
 }
 
 /**
@@ -295,8 +288,7 @@ export function getBundledVrmBuffer(
 /** Tests : vide la calibration module (buffer cache + baseline mesuree). */
 export function resetVrmCalibration(): void {
   bundledVrmBufferPromise = null;
-  bundledVrmHeight = null;
-  bundledVrmHalfMaxDim = null;
+  bundledVrmBaseline = null;
 }
 
 /**
@@ -346,6 +338,10 @@ export async function startPreviewRuntime(
   scene.add(fillLight);
 
   // --- VRM --------------------------------------------------------------
+  // Baseline de cadrage (boite du lobster, mesuree une fois par session) :
+  // hauteur de normalisation + centre/pieds de reference pour la camera et
+  // l'alcove. Initialisee au fallback, affinee dans le callback de parse.
+  let baseline: VrmBaseline = FALLBACK_BASELINE;
   const vrmLoader = new GLTFLoader();
   vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -368,22 +364,15 @@ export async function startPreviewRuntime(
         // MEME TEMPS — une seule source de cadrage.
         VRMUtils.rotateVRM0(vrm);
         const vrmIsBundled = buffers.vrm === buffers.bundledVrm;
-        let nativeBaseline: { height: number; halfMaxDim: number } | null = null;
-        if (vrmIsBundled) {
-          nativeBaseline = sceneBaseline(vrm.scene);
-        }
-        const targetVrmHeight = await resolveTargetVrmHeight(
+        const nativeBaseline = vrmIsBundled ? sceneBaseline(vrm.scene) : null;
+        baseline = await resolveVrmBaseline(
           vrmIsBundled
-            ? {
-                isBundledVrm: true,
-                nativeHeight: nativeBaseline?.height ?? null,
-                nativeHalfMaxDim: nativeBaseline?.halfMaxDim ?? null,
-              }
+            ? { isBundledVrm: true, nativeBaseline }
             : { isBundledVrm: false, bundledVrm: buffers.bundledVrm }
         );
         // Le bundle lui-meme : scale = target/native = 1 (jamais rescale) ;
         // un resident : porte a la hauteur du lobster.
-        normalizeVrmHeight(vrm.scene, targetVrmHeight);
+        normalizeVrmHeight(vrm.scene, baseline.height);
         resolve(vrm);
       } catch (error) {
         reject(error);
@@ -400,24 +389,38 @@ export async function startPreviewRuntime(
     lookAtProxy.name = "VRMLookAtQuaternionProxy";
     vrm.scene.add(lookAtProxy);
   }
-  // Cadrage (incident 15/09 v3) : la DISTANCE de camera est figee sur la
-  // baseline du lobster (demi-max-dim mesure une fois par session). La bbox
-  // du VRM affiche sert UNIQUEMENT au calage en position (alcove, pivot,
-  // zone du geste) — plus AUCUN maxDimension mesure par modele dans le
-  // cadrage : un VRM aux bras ecartes et un VRM fin sont coupes identiquement.
+  // Cadrage (incidents 15/09 v1..v4) : TOUT est fige sur la baseline du
+  // lobster (boite mesuree une fois par session). Le VRM affiche est d'abord
+  // aligne sur la boite du lobster (centre confondu), puis la camera et
+  // l'alcove sont des constantes absolues. Plus AUCUNE mesure du modele
+  // affiche dans le cadrage : zoom et calage identiques pour tout VRM.
   const bbox = new THREE.Box3().setFromObject(vrm.scene);
   const bboxCenter = bbox.getCenter(new THREE.Vector3());
-  const fillDistance =
-    resolveBaselineHalfMaxDim() / Math.tan((camera.fov * Math.PI) / 360);
-  camera.position.set(
-    bboxCenter.x,
-    bboxCenter.y + resolveBaselineHeight() * CAM_PIVOT_OFFSET_Y_FACTOR,
-    bboxCenter.z + fillDistance * CAM_FILL_DISTANCE_FACTOR
+  // Aligne le centre du modele sur le centre du lobster (fixe) : le
+  // pivot/les pieds decales d'un VRM ne modifient plus le cadrage.
+  vrm.scene.position.set(
+    baseline.center.x - bboxCenter.x,
+    baseline.center.y - bboxCenter.y,
+    baseline.center.z - bboxCenter.z
   );
-  camera.lookAt(bboxCenter);
+  const alignOffset = vrm.scene.position.clone();
+
+  const camCenter = new THREE.Vector3(
+    baseline.center.x,
+    baseline.center.y,
+    baseline.center.z
+  );
+  const fillDistance =
+    baseline.halfMaxDim / Math.tan((camera.fov * Math.PI) / 360);
+  camera.position.set(
+    camCenter.x,
+    camCenter.y + baseline.height * CAM_PIVOT_OFFSET_Y_FACTOR,
+    camCenter.z + fillDistance * CAM_FILL_DISTANCE_FACTOR
+  );
+  camera.lookAt(camCenter);
   // Cadrage de reference : distance et direction figees, le zoom (pose) ne
   // fait que diviser la distance. La camera ne change plus d'orientation.
-  const cameraCenter = bboxCenter.clone();
+  const cameraCenter = camCenter.clone();
   const cameraDistance = camera.position.distanceTo(cameraCenter);
   const cameraDirection = camera.position.clone().sub(cameraCenter).normalize();
   // Orientation naturelle du modele (apres correction VRM 0.x) : les yaws
@@ -427,11 +430,13 @@ export async function startPreviewRuntime(
   let zoom = 1;
   let depth = 0;
   // Geste 4.5 : coins de la bbox de l'avatar, projetes a la demande (la zone
-  // suit le zoom, contrairement a un cache fige au cadrage initial).
+  // suit le zoom, contrairement a un cache fige au cadrage initial). La bbox
+  // est relevee APRES l'alignement (centre = baseline lobster).
+  const alignedBox = new THREE.Box3().setFromObject(vrm.scene);
   const bboxCorners: THREE.Vector3[] = [];
-  for (const x of [bbox.min.x, bbox.max.x]) {
-    for (const y of [bbox.min.y, bbox.max.y]) {
-      for (const z of [bbox.min.z, bbox.max.z]) {
+  for (const x of [alignedBox.min.x, alignedBox.max.x]) {
+    for (const y of [alignedBox.min.y, alignedBox.max.y]) {
+      for (const z of [alignedBox.min.z, alignedBox.max.z]) {
         bboxCorners.push(new THREE.Vector3(x, y, z));
       }
     }
@@ -474,7 +479,7 @@ export async function startPreviewRuntime(
   // l'echelle native de l'alcove (les unites du .glb sont les leurs) — le
   // ratio alcove/avatar est celui du cadrage d'origine du lobster, comme
   // cote Web (`environmentLoader.ts` : "stable size benchmark").
-  alcoveScene.position.set(bboxCenter.x, bbox.min.y, bboxCenter.z);
+  alcoveScene.position.set(baseline.center.x, baseline.minY, baseline.center.z);
   scene.add(alcoveScene);
 
   /** Applique un zoom contraint et repositionne la camera (distance seule). */
@@ -491,7 +496,9 @@ export async function startPreviewRuntime(
   function applyDepth(nextDepth: number): void {
     if (disposed) return;
     depth = Math.min(POSE_DEPTH_MAX, Math.max(POSE_DEPTH_MIN, nextDepth));
-    vrm.scene.position.z = depth;
+    // La profondeur est un OFFSET autour de la position alignee du modele
+    // (le centre reste confondu avec la baseline lobster, z = alignOffset.z).
+    vrm.scene.position.z = alignOffset.z + depth;
   }
 
   return {
