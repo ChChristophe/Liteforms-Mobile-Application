@@ -214,6 +214,13 @@ export default function ConnectScreen() {
           >
             <Text style={styles.buttonText}>Continuer la configuration</Text>
           </Pressable>
+          <Pressable
+            style={styles.linkButton}
+            accessibilityRole="button"
+            onPress={() => router.push('/advanced-connection')}
+          >
+            <Text style={styles.linkText}>Paramètres avancés (IP / port)</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
