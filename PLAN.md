@@ -1739,109 +1739,50 @@ appareil reel. TypeScript et Vitest ne suffisent pas pour ces chemins.
 
 ## 9. Performance et limites acceptees
 
-### Decision produit 15/09 — cadrage preview normalise (incident zoom variable)
+### Post-mortem 15/09 — cadrage du preview (long incident, clos)
 
-Incident terrain : le niveau de zoom apparent de l'ensemble alcove+VRM variait
-du simple au triple selon le VRM telecharge (bbox differentes : bras ecartes,
-hauteur, pivot). Fix : referentiel commun, comme cote Web/Electron
-(« alcove remains a stable size benchmark »).
+**Objectif** : chaque VRM téléchargé doit s'afficher dans l'alcove à son échelle
+native (comme `/hologram`), avec un **alcove de taille constante** à l'écran.
 
-* Chaque VRM est normalise a `TARGET_VRM_HEIGHT = 1.0` unite monde (lib
-  `previewRuntime`, `normalizeVrmHeight`) : invariant `1.0 = hauteur debout
-  de l'avatar`. Mesure sur la HAUTEUR bbox (Y), pas le plus grand axe, sinon
-  un VRM aux bras ecartes serait retreci.
-* La normalisation a lieu apres `VRMUtils.rotateVRM0` (le bbox d'un VRM 0.x
-  doit etre mesure sur l'orientation corrigee) et avant le calcul du cadrage.
-* Le cadrage camera devient constant : fillDistance*1.45 et l'offset +0.05 ne
-  dependent plus que d'une bbox normalisee identique pour tout VRM.
-* L'alcove reste a l'echelle native et se cale automatiquement sur la bbox
-  (centre + min.y) : meme cadrage visuel pour tout VRM (baseline = lobster
-  normalise, meilleure run d'accompagnement au 15/09).
-* Mutation en place au chargement (scale), idempotente, sans rechargement ;
-  dispose et purge texture cache inchanges.
-
-Limites connues : VRM 0.x extremes (pivot tres decale) et humanoids non
-pivotes proprement peuvent rester legerement decales en position, pas en
-zoom. Un VRM plus large que haut ferait varier fillDistance via
-maxDimension ; acceptable au POC (les VRM courants sont plus hauts que larges).
-
-### Decision produit 15/09 (v2) — ratio alcove/avatar calle sur le lobster
-
-Regression terrain apres la v1 : la normalisation systematique a 1.0 creait un
-faux ratio — l'alcove resta a ses unites natives pendant que l'avatar passait a
-1.0, d'ou un cadrage trop zoome (alcove et avatar partiellement coupes).
-
-* La hauteur cible de normalisation n'est plus `TARGET_VRM_HEIGHT = 1.0` mais la
-  HAUTEUR NATIVE MESUREE du bundle lobster (`lobsterEdit.vrm`), reference
-  visuelle du cadrage (alcove a ses unites natives + camera calcee sur SA bbox
-  = framing d'origine). La constante 1.0 devient un simple fallback (buffer
-  bundle illisible / bbox vide).
-* Le lobster affiche n'est JAMAIS rescale (target/natif = 1) : invariance du
-  cadrage mainWindow equivalente a l'etat d'avant 0f99e51.
-* Le buffer bundle est pre-charge au demarrage (`getBundledVrmBuffer`,
-  cache MODULE via Promise.all alcove+vrma) et reuse — un seul chargement par
-  session, reload runtime inclus, pas de double lecture quand le resident est
-  le bundle (deja exclu cote residentVrm).
-* La mesure n'a lieu qu'une fois par session (cache module `bundledVrmHeight`,
-  remesure si echec apres un reload runtime ; aucun setState par frame). Le
-  parse de mesure (resident affiche avant toute session bundle) est jetable et
-  dispose ses geometries : cout une fois, pas par frame.
-* Ordre preserve : `rotateVRM0` PUIS mesure/normalisation (hauteur stable sur Y).
-
-Limites : si le resident est affiche avant que le lobster ait jamais ete
-affiche, un parse supplementaire du bundle a lieu (une fois par session max).
-VRM 0.x extremes : inchanges (voir limites v1).
-
-### Decision produit 15/09 (v3) — camera figee sur le baseline lobster
-
-Regression persistante (3e run) apres 0f99e51 + b71090c : la TAILLE visible
-alcove+avatar variait ENCORE selon le VRM charge. Cause racine : `fillDistance`
-etait derive de `maxDimension = max(x, y, z)` de la bbox du VRM AFFICHE — un
-VRM aux bras ecartes (bbox X > Y) etait dezoome, un VRM fin surzoome. Tant que
-la camera derive d'une mesure du modele affiche, le zoom varie : seule l'alcove
-est une reference stable.
-
-* La baseline mesuree une fois par session (`bundledVrmHeight`) est ETENDEE a
-  une baseline camera complete sur la bbox du lobster PARSE :
-  `bundledVrmHalfMaxDim` = demi-max-dimension (formule exacte :
-  `fillDistance = halfMaxDim / tan(fov/2)`, fond d'ecran
-  `camera.position.z = centre.z + fillDistance * CAM_FILL_DISTANCE_FACTOR`
-  (1.45) et `centre.y + hauteurLobster * CAM_PIVOT_OFFSET_Y_FACTOR` (0.05) —
-  les deltas -0.05y / 1.45z en dur deviennent ces constantes).
-* Le load d'un VRM (bundled OU resident normalise a la hauteur lobster) place
-  la camera a la distance FIXE baseline depuis le centre de la bbox affichee,
-  memes offsets : PLUS AUCUN `maxDimension` mesure par VRM dans le cadrage.
-* La bbox du VRM affiche ne sert plus qu'au calage POSITION (centre/min.y de
-  l'alcove, bboxCorners du geste) et au calage vertical — jamais au zoom.
-* Fallback securitaire si le lobster est illisible : halfMaxDim = hauteur
-  cible/2 (0.5), meme ordre de cadrage que le fallback v2.
-
-Limites connues : le zoom (geste) reste un multiplicateur de la distance
-portée (`cameraDistance / zoom`) — le referentiel du geste est inchange. Un
-VRM TRES hors norme (t-pose extreme, pivot tres decale) reste borne : son
-cadrage est celui du lobster, seul son calage vertical suit sa bbox. Si un
-cadrage adapte par morphologie devient un jour necessaire, ce sera une
-decision camera explicite (pas un effet de bord de mesure).
-
-### Decision produit 15/09 (v6, DEFINITIVE) — portage fidèle du cadrage Desktop
-
-Les v1→v3 ci-dessus sont **obsolètes** : le bon comportement était de ne PAS
-réinventer, mais de **porter le cadrage exact du Desktop** (`modelFraming.ts` +
-`applyMeasuredFraming` d'AvatarScene). Motif (feedback terrain) : « lilshark
-est énorme/tout petit, pas à son échelle native, alcove pas entière ».
-
-* `lib/avatar/modelFraming.ts` est **copié verbatim** du repo Electron (module
-  pur three.js) + son test. Le runtime `previewRuntime` porte aussi
-  `applyMeasuredFraming` / `measureSizeAtScale` / `solveRootPositionForBounds`.
-* Cadrage : le **lobster est cadré à `maxAxis = 1.8`** ; un modèle importé est
+**Ce qui a marché (état final, validé terrain)** :
+- `lib/avatar/modelFraming.ts` est **copié verbatim** du repo Electron (module
+  pur three.js) + son test ; `previewRuntime` porte aussi `applyMeasuredFraming` /
+  `measureSizeAtScale` / `solveRootPositionForBounds`.
+- Cadrage : le **lobster est cadré à `maxAxis = 1.8`** ; un modèle importé est
   cadré dans **l'empreinte de ce lobster cadré** (`computeInsetFootprint`, fills
-  0.9/0.82). Échelle **uniforme** → proportions natives préservées (un modèle
-  large/plat reste plat, un petit reste petit — exactement le rendu `/hologram`).
-* L'alcove suit la **même échelle/position que le modèle**
-  (`environmentScale`/`environmentPosition` = `framing.finalScale/finalPosition`).
-* Caméra **fixe** (constante de `REF_MAX_AXIS`), aucune mesure du modèle affiché.
-* Règle retenue : **une feature de rendu du Desktop se porte verbatim, pas en
-  réimplémentant sa formule** — toute « formule équivalente » a dérivé (4 essais).
+  0.9/0.82). Échelle **uniforme** → proportions natives préservées.
+- L'alcove suit l'échelle/position du **lobster** (constante), PAS du modèle
+  affiché (`environmentScale`/`environmentPosition` = `lobsterReference`).
+- Caméra **cadrée sur l'empreinte de l'alcove** (constante) : distance pilotée
+  par la largeur → **taille en pixels constante** quel que soit l'aspect du GLView.
+- Marge caméra `CAM_FILL_DISTANCE_FACTOR = 1.2` (l'alcove occupe ~83 % de la
+  largeur ; 1.45 hérité du Web 9:16 était trop dézoomé sur écran portrait).
+
+**Incidents et causes racine (5 itérations)** :
+1. Cadrage sur la bbox du VRM affiché → zoom variable selon le modèle. Fix : ne
+   plus mesurer le modèle affiché dans le cadrage.
+2. Normalisation à hauteur fixe (`1.0`) → détruisait les proportions natives
+   (lilshark « énorme »). Fix : abandon de la normalisation en hauteur.
+3. Alcoolve scalée par l'échelle du modèle → alcove rétrécie/coupée. Fix : alcove
+   scalée par la référence lobster (constante).
+4. `gl.drawingBufferWidth/Height` (framebuffer expo-gl) **instable d'un montage
+   d'écran à l'autre** (aspect 0.75↔0.93) → taille de l'alcove qui dérive. Fix :
+   cadrer la caméra sur l'empreinte de l'alcove (constante), pas sur l'aspect.
+5. Letterbox (aspect figé) ne fixait que l'aspect, pas la taille en pixels. Fix :
+   cadrage caméra sur la largeur de l'alcove (buffer width constant).
+
+**Leçons** :
+- Une feature de rendu du Desktop se **porte verbatim** (`modelFraming.ts`), pas
+  en réimplémentant sa formule — 3 « formules équivalentes » ont dérivé.
+- Le framebuffer expo-gl n'est **pas stable** entre remontages : ne jamais baser
+  un cadrage « pixel-stable » sur l'aspect du buffer ; baser sur une **référence
+  constante** (l'alcove) et la largeur du buffer.
+- Les logs de cadrage (`[previewRuntime] framing`) ont été l'outil décisif pour
+  sortir du cycle deviner/tester : à garder pour tout futur incident 3D.
+
+**Reste** : portage `avatar.pose` (dernier warning du contrat) ; le cadrage ne
+couvre pas encore un VRM TRES hors norme (t-pose extrême) — décision caméra
+explicite si nécessaire un jour.
 
 ### Objectifs
 
