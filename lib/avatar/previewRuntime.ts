@@ -124,6 +124,10 @@ export type PreviewHandle = {
    * idempotent, reutilise au montage et a chaque changement du store.
    */
   applyPose: (pose: AvatarPoseConfig) => void;
+  /** Met a jour l'aspect camera + la taille du renderer quand le GLView
+   * (re)prend sa taille reelle (corrige les tailles transitoires du
+   * contexte). `width`/`height` = dimensions physiques du framebuffer. */
+  resize: (width: number, height: number) => void;
   /** Libere geometries, materiaux, textures, mixer, VRM et renderer. */
   dispose: () => void;
 };
@@ -689,6 +693,12 @@ export async function startPreviewRuntime(
       alcoveScene.rotation.y = pose.alcoveYaw;
       applyZoom(pose.zoom);
       applyDepth(pose.depth);
+    },
+    resize(width, height) {
+      if (disposed || width <= 0 || height <= 0) return;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
     },
     dispose() {
       if (disposed) return;

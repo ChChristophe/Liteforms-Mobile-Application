@@ -435,6 +435,19 @@ export const AvatarPreview = memo(function AvatarPreview({
               width: event.nativeEvent.layout.width,
               height: event.nativeEvent.layout.height,
             };
+            // Le GLView peut avoir ete cree a une taille transitoire (layout
+            // pas encore stabilise) : realigne la camera/renderer sur la
+            // taille reelle du framebuffer (fix « alcove qui change de
+            // resolution » 15/09).
+            const gl = glRef.current;
+            if (gl !== null) {
+              const w = gl.drawingBufferWidth;
+              const h = gl.drawingBufferHeight;
+              if (w > 0 && h > 0) {
+                contextSizeRef.current = { width: w, height: h };
+                runtimeRef.current?.resize(w, h);
+              }
+            }
           }}
         >
           <GLView
