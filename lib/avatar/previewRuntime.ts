@@ -37,8 +37,10 @@ import type { AvatarMood } from "../../types/config";
 export const REF_MAX_AXIS = 1.8;
 
 // Facteurs de cadrage camera (figes sur le baseline lobster).
-/** Recul camera = fillDistance x ce facteur (cadrage d'origine du Web). */
-export const CAM_FILL_DISTANCE_FACTOR = 1.45;
+/** Recul camera = distance de cadrage x ce facteur (marge). 1.2 = l'alcove
+ * occupe ~83 % de la largeur du buffer (1.45 hérité du rendu Web 9:16 était
+ * trop dézoomé sur un écran portrait). */ 
+export const CAM_FILL_DISTANCE_FACTOR = 1.2;
 /** Calage vertical camera = hauteur lobster x ce facteur (au-dessus du centre). */
 export const CAM_PIVOT_OFFSET_Y_FACTOR = 0.05;
 /** Decalage vertical des modeles importes (constant d'AvatarScene Electron). */

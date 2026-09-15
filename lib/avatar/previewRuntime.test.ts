@@ -119,7 +119,7 @@ describe("resolveLobsterReference (cache une fois par session)", () => {
     expect(await resolveLobsterReference({ isLobster: false })).toEqual(native);
   });
 
-  it("le facteur de recul est bien 1.45 (cadrage d'origine preserve)", () => {
-    expect(CAM_FILL_DISTANCE_FACTOR).toBe(1.45);
+  it("le facteur de recul est 1.2 (alcove plus grosse sur ecran portrait)", () => {
+    expect(CAM_FILL_DISTANCE_FACTOR).toBe(1.2);
   });
 });
