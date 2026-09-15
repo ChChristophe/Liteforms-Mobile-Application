@@ -1823,6 +1823,26 @@ cadrage est celui du lobster, seul son calage vertical suit sa bbox. Si un
 cadrage adapte par morphologie devient un jour necessaire, ce sera une
 decision camera explicite (pas un effet de bord de mesure).
 
+### Decision produit 15/09 (v6, DEFINITIVE) — portage fidèle du cadrage Desktop
+
+Les v1→v3 ci-dessus sont **obsolètes** : le bon comportement était de ne PAS
+réinventer, mais de **porter le cadrage exact du Desktop** (`modelFraming.ts` +
+`applyMeasuredFraming` d'AvatarScene). Motif (feedback terrain) : « lilshark
+est énorme/tout petit, pas à son échelle native, alcove pas entière ».
+
+* `lib/avatar/modelFraming.ts` est **copié verbatim** du repo Electron (module
+  pur three.js) + son test. Le runtime `previewRuntime` porte aussi
+  `applyMeasuredFraming` / `measureSizeAtScale` / `solveRootPositionForBounds`.
+* Cadrage : le **lobster est cadré à `maxAxis = 1.8`** ; un modèle importé est
+  cadré dans **l'empreinte de ce lobster cadré** (`computeInsetFootprint`, fills
+  0.9/0.82). Échelle **uniforme** → proportions natives préservées (un modèle
+  large/plat reste plat, un petit reste petit — exactement le rendu `/hologram`).
+* L'alcove suit la **même échelle/position que le modèle**
+  (`environmentScale`/`environmentPosition` = `framing.finalScale/finalPosition`).
+* Caméra **fixe** (constante de `REF_MAX_AXIS`), aucune mesure du modèle affiché.
+* Règle retenue : **une feature de rendu du Desktop se porte verbatim, pas en
+  réimplémentant sa formule** — toute « formule équivalente » a dérivé (4 essais).
+
 ### Objectifs
 
 - ne pas bloquer l'UI pendant le chargement ;
