@@ -95,7 +95,7 @@ export default function ConnectScreen() {
   if (phase === 'wifiForm') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Votre WiFi</Text>
           <Text style={styles.hint}>
             Dites à l'appliance quel WiFi rejoindre. Le mot de passe est
@@ -162,7 +162,7 @@ export default function ConnectScreen() {
   if (phase === 'switching' || phase === 'sending') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Connexion en cours</Text>
           <ActivityIndicator color="#4a90d9" style={styles.activity} />
           <Text style={styles.hint}>
@@ -203,7 +203,7 @@ export default function ConnectScreen() {
   if (phase === 'connected') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.statusCard}>
             <Text style={styles.statusOk}>Appliance appariée ✓</Text>
           </View>
@@ -229,7 +229,7 @@ export default function ConnectScreen() {
   if (phase === 'failed') {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Connexion non établie</Text>
           <Text style={styles.error}>{lastError ?? 'Erreur inconnue.'}</Text>
           <Pressable
@@ -255,7 +255,7 @@ export default function ConnectScreen() {
   const discovering = phase === 'discovering' || phase === 'idle';
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {discovering ? (
           <>
             <Text style={styles.title}>Recherche de l'appliance…</Text>
@@ -298,7 +298,12 @@ export default function ConnectScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#ffffff' },
-  content: { flex: 1, padding: 24 },
+  // flexGrow (PAS flex:1) dans un contentContainerStyle : flex:1 fixe la
+  // hauteur du contenu à celle du viewport et désactive le scroll (recu
+  // 15/09/2026 — « écran non scrollable » persistait après le passage à
+  // ScrollView). flexGrow étire à hauteur d'écran minimum et grandit au-delà.
+  content: { flexGrow: 1, padding: 24 },
+  scroll: { flex: 1 },
   title: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 12 },
   label: {
     fontSize: 14,
