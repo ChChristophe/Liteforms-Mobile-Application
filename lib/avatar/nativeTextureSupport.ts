@@ -355,7 +355,7 @@ function readGLBHeader(buffer: ArrayBuffer): { magic: string; text: string } {
 }
 
 /** Indique si le buffer est un conteneur GLB valide ("glTF"). */
-function isGlbBuffer(buffer: ArrayBuffer): boolean {
+export function isGlbBuffer(buffer: ArrayBuffer): boolean {
   return readGLBHeader(buffer).magic === "glTF";
 }
 
