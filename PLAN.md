@@ -287,6 +287,14 @@ critique « Mobile pilote, Desktop applique » est prouve.
    `styles.content` en `contentContainerStyle`, `keyboardShouldPersistTaps`).
    Le typecheck ne detecte pas ce defaut : verifier la hauteur/largeur des
    ecrans touches a chaque fois.
+7. Une lecture locale de fichier passe par expo-file-system
+   (`readAsStringAsync` Base64 + decode pur), jamais `fetch(file://)`
+   arbitraire — fetch file:// n'est promis QUE pour les assets du cache
+   bundle (incident bandeau « resident illisible » du 15/09 : le
+   telechargement etait sain, la lecture doc-directory via fetch XHR echouait
+   sur Android avec Network request failed / HTTP 0). La fonction etend
+   toujours le message `invalid` avec `byteLength` + 4 premiers octets ASCII
+   avant d'interpreter le defaut (vide / tronque / HTML / magic).
 
 ---
 

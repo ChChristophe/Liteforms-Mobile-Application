@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import * as FileSystem from "expo-file-system/legacy";
 import { isGlbBuffer } from "../avatar/nativeTextureSupport";
+import { decodeBase64 } from "./base64";
 
 /**
  * VRM resident sur le telephone (decision D2, 15/09/2026).
@@ -158,7 +159,7 @@ export async function clearResidentVrm(): Promise<void> {
  * - `invalid` : metadata presentes mais fichier absent/illisible — message
  *   affichable, JAMAIS un crash : le preview retombe sur le bundle avec
  *   l'avertissement visible.
- */
+   */
 export async function loadResidentVrm(): Promise<ResidentVrmLoad> {
   const meta = await loadResidentVrmMeta();
   if (meta === null) return { status: "none", reason: "absent" };
@@ -172,23 +173,56 @@ export async function loadResidentVrm(): Promise<ResidentVrmLoad> {
       message: "VRM résident indisponible : le modèle intégré est affiché.",
     };
   }
+  let buffer: ArrayBuffer | null = null;
   try {
-    // RN fetch supporte `file://` (meme technique que loadBundledAssetBuffer).
-    const response = await fetch(file);
-    if (!response.ok) {
-      throw new Error(`statut HTTP ${response.status}`);
-    }
-    const buffer = await response.arrayBuffer();
+    // Lecture via expo-file-system (readAsStringAsync Base64), JAMAIS
+    // `fetch(file://)` arbitraire : seul le cache d'assets bundle a un chemin
+    // fetch promis sur RN (leçon 15/09 — Network request failed / HTTP 0 sur
+    // Android pour un file:// du document directory).
+    buffer = await readResidentBuffer(file);
     if (!isGlbBuffer(buffer)) {
       throw new Error("conteneur GLB invalide (magic absent)");
     }
     return { status: "resident", buffer, fileName: meta.fileName };
   } catch (error) {
+    // Memoire (lecture unique au chargement) : cout transitoire ~1,3x le
+    // binaire (string base64 + ArrayBuffer), acceptable pour un VRM de
+    // dizaines de Mo ; pas de conservation du tampon apres le retour.
     if (__DEV__) console.warn("[residentVrm] resident read failed", error);
+    // Diagnostic sans divination : taille lue (0 si lecture ratee) + 4
+    // premiers octets ASCII comparables (divergence fichier vide / tronque /
+    // HTML d'erreur / mauvais magic). Aucun octet binaire dans le message.
+    const byteLength = buffer?.byteLength ?? 0;
+    const firstBytes = buffer !== null ? asciiPrefix(buffer, 4) : "";
+    const cause = error instanceof Error ? error.message : "erreur inconnue";
     return {
       status: "invalid",
       message:
-        "VRM résident illisible ou corrompu : le modèle intégré est affiché.",
+        `VRM résident illisible ou corrompu (${byteLength} octets lus` +
+        (firstBytes ? `, début « ${firstBytes} »` : "") +
+        ` ; ${cause}) : le modèle intégré est affiché.`,
     };
   }
 }
+
+/**
+ * Lit le binaire resident via expo-file-system : readAsStringAsync en
+ * Base64 puis decodage pur (RN n'a pas d'atob garanti sur tous les runtimes).
+ */
+async function readResidentBuffer(file: string): Promise<ArrayBuffer> {
+  const base64 = await FileSystem.readAsStringAsync(file, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return decodeBase64(base64);
+}
+
+/** 4 premiers octets -> ASCII imprimable comparable ("?" pour le reste). */
+function asciiPrefix(buffer: ArrayBuffer, max: number): string {
+  const head = new Uint8Array(buffer, 0, Math.min(max, buffer.byteLength));
+  let text = "";
+  for (const byte of head) {
+    text += byte >= 0x20 && byte < 0x7f ? String.fromCharCode(byte) : "?";
+  }
+  return text;
+}
+

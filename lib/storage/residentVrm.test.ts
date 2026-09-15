@@ -22,11 +22,22 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   },
 }));
 
-/** FileSystem mocke : documentDirectory fixe, deleteAsync journalise. */
+/** FileSystem mocke : documentDirectory fixe, deleteAsync journalise,
+ * readAsStringAsync sert des fichiers base64 portes en memoire. */
 const deletedFiles: string[] = [];
+/** URI -> contenu base64 (null = fichier absent => readAsStringAsync lève). */
+const residentFiles = new Map<string, string | null>();
 vi.mock("expo-file-system/legacy", () => ({
   documentDirectory: "file:///docs/",
+  EncodingType: { Base64: "base64" },
   deleteAsync: vi.fn(async (uri: string) => void deletedFiles.push(uri)),
+  readAsStringAsync: vi.fn(async (uri: string) => {
+    const content = residentFiles.get(uri);
+    if (content === null || content === undefined) {
+      throw new Error(`fichier introuvable : ${uri}`);
+    }
+    return content;
+  }),
 }));
 
 /** isGlbBuffer re-implemente au test (magic 4 octets "glTF"). */
@@ -37,6 +48,7 @@ vi.mock("../avatar/nativeTextureSupport", () => ({
   },
 }));
 
+import { toBase64 } from "./base64.test";
 import {
   clearResidentVrm,
   BUNDLED_VRM_FILE_NAME,
@@ -55,27 +67,20 @@ function makeGlbBuffer(): ArrayBuffer {
   return bytes.buffer;
 }
 
-/** fetch global : sert le buffer ou echoue selon le test. */
-function mockFetchWith(buffer: ArrayBuffer | null, status = 200): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => {
-      if (buffer === null) {
-        throw new TypeError("Network request failed");
-      }
-      return {
-        ok: status >= 200 && status < 300,
-        status,
-        arrayBuffer: async () => buffer,
-      } as unknown as Response;
-    })
-  );
+/** Installe le fichier resident (base64) ou le rend illisible (null). */
+function mockFileWith(buffer: ArrayBuffer | null): void {
+  const fileUri = "file:///docs/liteforms-resident.vrm";
+  if (buffer === null) {
+    residentFiles.delete(fileUri);
+  } else {
+    residentFiles.set(fileUri, toBase64(new Uint8Array(buffer)));
+  }
 }
 
 beforeEach(() => {
   memoryData.clear();
   deletedFiles.length = 0;
-  vi.unstubAllGlobals();
+  residentFiles.clear();
 });
 
 describe("loadResidentVrmMeta", () => {
@@ -136,7 +141,7 @@ describe("loadResidentVrm", () => {
       RESIDENT_VRM_META_KEY,
       JSON.stringify({ fileName: "Avatar_01.vrm", hash: null })
     );
-    mockFetchWith(makeGlbBuffer());
+    mockFileWith(makeGlbBuffer());
 
     const result = await loadResidentVrm();
 
@@ -147,36 +152,50 @@ describe("loadResidentVrm", () => {
     }
   });
 
-  it("magic invalide (residu non-GLB) : invalid + message, jamais crash", async () => {
+  it("magic invalide (residu non-GLB) : invalid + message diagnostique, jamais crash", async () => {
     memoryData.set(
       RESIDENT_VRM_META_KEY,
       JSON.stringify({ fileName: "Avatar_01.vrm", hash: null })
     );
     // Page HTML d'erreur du serveur : n'est PAS un conteneur GLB.
     const html = new TextEncoder().encode("<html>Not Found</html>").buffer;
-    mockFetchWith(html);
+    mockFileWith(html);
 
     const result = await loadResidentVrm();
 
     expect(result.status).toBe("invalid");
     if (result.status === "invalid") {
       expect(result.message).toMatch(/modèle intégré/);
+      // Diagnostic enrichi : taille lue + 4 premiers octets ASCII.
+      expect(result.message).toMatch(/22 octets lus, début « <htm »/);
     }
   });
 
-  it("fichier manquant/illisible : invalid + message affichable", async () => {
+  it("fichier manquant : invalid + message affichable (0 octets, cause lisible)", async () => {
     memoryData.set(
       RESIDENT_VRM_META_KEY,
       JSON.stringify({ fileName: "Avatar_01.vrm", hash: null })
     );
-    mockFetchWith(null);
+    mockFileWith(null);
 
     const result = await loadResidentVrm();
 
     expect(result.status).toBe("invalid");
     if (result.status === "invalid") {
       expect(result.message).toMatch(/modèle intégré/);
+      expect(result.message).toMatch(/0 octets lus/);
+      expect(result.message).toMatch(/fichier introuvable/);
     }
+  });
+
+  it("fichier vide (base64 \"\") : invalid, 0 octets lus, pas de début", async () => {
+    memoryData.set(
+      RESIDENT_VRM_META_KEY,
+      JSON.stringify({ fileName: "Avatar_01.vrm", hash: null })
+    );
+    residentFiles.set("file:///docs/liteforms-resident.vrm", "");
+
+    expect((await loadResidentVrm()).status).toBe("invalid");
   });
 });
 
