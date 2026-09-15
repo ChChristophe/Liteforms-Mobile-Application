@@ -31,6 +31,8 @@ export default function ConnectScreen() {
   const reset = useOnboardingStore((s) => s.reset);
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
+  // Œil du champ mot de passe : etat local a l'ecran, jamais persiste.
+  const [showPassword, setShowPassword] = useState(false);
   const switchingRef = useRef(false);
   // Boucle « switching » : nombre de scans LAN infructueux consecutifs.
   // Sert uniquement a afficher une aide (pas une erreur) apres ~4 echecs,
@@ -111,15 +113,32 @@ export default function ConnectScreen() {
             accessibilityLabel="SSID du WiFi maison"
           />
           <Text style={styles.label}>Mot de passe WiFi</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Vide si le réseau est ouvert"
-            placeholderTextColor="#9ca3af"
-            secureTextEntry
-            accessibilityLabel="Mot de passe du WiFi maison"
-          />
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={styles.passwordInput}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Vide si le réseau est ouvert"
+              placeholderTextColor="#9ca3af"
+              secureTextEntry={!showPassword}
+              accessibilityLabel="Mot de passe du WiFi maison"
+            />
+            <Pressable
+              style={styles.eyeButton}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showPassword
+                  ? 'Masquer le mot de passe'
+                  : 'Afficher le mot de passe'
+              }
+              hitSlop={8}
+              onPress={() => setShowPassword((v) => !v)}
+            >
+              <Text style={styles.eyeGlyph} accessibilityElementsHidden>
+                {showPassword ? '🙈' : '👁'}
+              </Text>
+            </Pressable>
+          </View>
           <Text style={styles.error}>{lastError}</Text>
           <Pressable
             style={styles.button}
@@ -292,6 +311,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9fafb',
     marginBottom: 8,
   },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 10,
+    backgroundColor: '#f9fafb',
+    marginBottom: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#111827',
+  },
+  eyeButton: { paddingHorizontal: 12, paddingVertical: 10 },
+  eyeGlyph: { fontSize: 18, color: '#6b7280' },
   hint: { fontSize: 13, lineHeight: 18, color: '#9ca3af', marginBottom: 8 },
   scanHelp: {
     fontSize: 13,
