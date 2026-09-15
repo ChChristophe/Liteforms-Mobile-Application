@@ -280,6 +280,13 @@ critique « Mobile pilote, Desktop applique » est prouve.
    `parseVrmList`) est le pattern a generaliser a tout nouveau endpoint.
 5. La saisie manuelle IP/port reste la reference tant que le provisioning
    WiFi et mDNS ne sont pas implémentes cote Electron.
+6. Les ecrans retoures (recu 15/09/2026) : TOUT ecran susceptible de depasser
+   une hauteur d'ecran doit utiliser `ScrollView` — chaque phase de
+   `connect.tsx` a ete recouverte apres avoir mis le lien « Parametres
+   avances » hors ecran non scrollable (2e occur. de la lecon 3 :
+   `styles.content` en `contentContainerStyle`, `keyboardShouldPersistTaps`).
+   Le typecheck ne detecte pas ce defaut : verifier la hauteur/largeur des
+   ecrans touches a chaque fois.
 
 ---
 
