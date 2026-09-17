@@ -78,10 +78,37 @@ describe("validateDeviceConfig", () => {
       ...DEFAULT_DEVICE_CONFIG,
       providers: {
         ...DEFAULT_DEVICE_CONFIG.providers,
-        stt: { ...DEFAULT_DEVICE_CONFIG.providers.stt, model: "" },
+        stt: { ...DEFAULT_DEVICE_CONFIG.providers.stt, provider: "deepgram", model: "" },
       },
     };
     expect(validateDeviceConfig(emptyModel).ok).toBe(false);
+  });
+
+  it("accepts the unconfigured sentinel \"none\" without requiring model/endpoint", () => {
+    const none = {
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        llm: { provider: "none", model: "ignored", endpoint: "https://ignored", voiceId: "ignored" },
+      },
+    };
+    const result = validateDeviceConfig(none);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // La sentinelle normalise model/endpoint/voiceId (etat canonique).
+      expect(result.config.providers.llm).toEqual({
+        provider: "none",
+        model: "",
+        endpoint: null,
+        voiceId: null,
+      });
+    }
+  });
+
+  it("starts every slot unconfigured (rien de pré-activé)", () => {
+    expect(DEFAULT_DEVICE_CONFIG.providers.llm.provider).toBe("none");
+    expect(DEFAULT_DEVICE_CONFIG.providers.tts.provider).toBe("none");
+    expect(DEFAULT_DEVICE_CONFIG.providers.stt.provider).toBe("none");
   });
 
   it("ignores unknown fields (compatibility policy)", () => {

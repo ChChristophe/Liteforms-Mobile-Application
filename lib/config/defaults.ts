@@ -16,13 +16,14 @@ export const DEFAULT_AVATAR_POSE: AvatarPoseConfig = {
  *
  * Sources :
  * - character : exemple canonique du PLAN.md (section 5.1) ;
- * - providers : defauts des catalogues Web actuels
- *   (`lib/llm/providerOptions.ts`, `lib/speech/providerOptions.ts`) ;
+ * - providers : « rien de pré-activé » (décision 17/09/2026) — les trois
+ *   slots démarrent à `"none"`, l'utilisateur choisit explicitement ;
  * - modelRef : modele de reference du projet (POC historique, D2).
  *
  * Ces valeurs doivent toujours passer `validateDeviceConfig` : une config
  * par defaut invalide ferait echouer la gate "une configuration invalide ne
- * passe pas le store".
+ * passe pas le store". (Une config avec `"none"` est VALIDE mais non
+ * envoyable : `serializeDeviceConfig` la refuse.)
  */
 export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   configVersion: "1.0",
@@ -46,21 +47,21 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   },
   providers: {
     llm: {
-      provider: "openai",
-      model: "gpt-5.5",
-      endpoint: "https://api.openai.com/v1",
+      provider: "none",
+      model: "",
+      endpoint: null,
       voiceId: null,
     },
     tts: {
-      provider: "elevenlabs",
-      model: "eleven_flash_v2_5",
-      endpoint: "https://api.elevenlabs.io/v1",
-      voiceId: "CwhRBWXzGAHq8TQ4Fs17",
+      provider: "none",
+      model: "",
+      endpoint: null,
+      voiceId: null,
     },
     stt: {
-      provider: "deepgram",
-      model: "nova-3",
-      endpoint: "https://api.deepgram.com/v1",
+      provider: "none",
+      model: "",
+      endpoint: null,
       voiceId: null,
     },
   },

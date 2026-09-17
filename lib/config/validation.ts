@@ -10,6 +10,7 @@ import {
   POSE_ZOOM_MAX,
   POSE_ZOOM_MIN,
   PRONOUNS,
+  UNCONFIGURED_PROVIDER,
   type AvatarConfig,
   type AvatarMood,
   type AvatarPoseConfig,
@@ -37,6 +38,7 @@ export type DeviceConfigValidation =
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
 
 const LLM_PROVIDER_IDS: readonly LlmProviderId[] = [
+  UNCONFIGURED_PROVIDER,
   "anthropic",
   "openai",
   "openai-realtime",
@@ -59,6 +61,7 @@ const LLM_PROVIDER_IDS: readonly LlmProviderId[] = [
 ];
 
 const TTS_PROVIDER_IDS: readonly TtsProviderId[] = [
+  UNCONFIGURED_PROVIDER,
   "kokoro",
   "elevenlabs",
   "deepgram",
@@ -78,6 +81,7 @@ const TTS_PROVIDER_IDS: readonly TtsProviderId[] = [
 ];
 
 const STT_PROVIDER_IDS: readonly SttProviderId[] = [
+  UNCONFIGURED_PROVIDER,
   "distil-whisper",
   "deepgram",
   "elevenlabs",
@@ -276,6 +280,11 @@ function validateProviders(value: unknown): DeviceConfig["providers"] | string {
 
 /**
  * Valide une selection de provider contre l'union de son slot.
+ *
+ * Sentinelle `"none"` : slot non configuré. Accepté sans exiger
+ * model/endpoint/voiceId (normalisés à `""`/`null`/`null`) ; c'est un état
+ * d'édition valide, jamais envoyable (`serializeDeviceConfig` le refuse).
+ *
  * @param path chemin du slot dans les messages d'erreur.
  * @param allowedIds identifiants valides pour ce slot.
  * @returns la selection validee, ou une chaine decrivant l'erreur.
@@ -290,6 +299,10 @@ function validateSelection<P extends string>(
   if (typeof v.provider !== "string" || !allowedIds.includes(v.provider as P)) {
     return `${path}.provider must be one of ${allowedIds.join(", ")}`;
   }
+  const provider = v.provider as P;
+  if (provider === UNCONFIGURED_PROVIDER) {
+    return { provider, model: "", endpoint: null, voiceId: null };
+  }
   if (typeof v.model !== "string" || v.model.length === 0) {
     return `${path}.model must be a non-empty string`;
   }
@@ -300,9 +313,24 @@ function validateSelection<P extends string>(
     return `${path}.voiceId must be a string or null`;
   }
   return {
-    provider: v.provider as P,
+    provider,
     model: v.model,
     endpoint: v.endpoint as string | null,
     voiceId: v.voiceId as string | null,
   };
+}
+
+/**
+ * Indique si au moins un slot provider est encore non configuré (`"none"`).
+ *
+ * Une telle config est VALIDE pour l'édition mais NON ENVOYABLE : l'écran
+ * review s'en sert pour bloquer l'envoi et `serializeDeviceConfig` pour la
+ * refuser (défense en profondeur).
+ *
+ * @param config configuration (validee ou non).
+ */
+export function hasUnconfiguredProvider(config: DeviceConfig): boolean {
+  return (["llm", "tts", "stt"] as const).some(
+    (slot) => config.providers[slot].provider === UNCONFIGURED_PROVIDER
+  );
 }

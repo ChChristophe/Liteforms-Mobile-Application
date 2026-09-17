@@ -38,12 +38,23 @@ export const AVATAR_MOODS: readonly AvatarMood[] = [
 ];
 
 /**
+ * Valeur sentinelle « provider non configuré » (décision produit 17/09/2026,
+ * « rien de pré-activé ») : les trois slots démarrent à `"none"`, l'utilisateur
+ * choisit explicitement. `"none"` est VALIDE pour l'édition locale et la
+ * persistance, mais JAMAIS envoyable sur le fil : `serializeDeviceConfig` le
+ * refuse (l'appliance n'a pas à gérer cette sentinelle).
+ */
+export const UNCONFIGURED_PROVIDER = "none" as const;
+
+/**
  * Providers LLM configurables, alignes sur le catalogue Web
  * (`LLM_PROVIDER_OPTIONS`). Les providers d'execution navigateur
  * (`browser-local-qwen`, `browser-local-gemma`) sont exclus : seul le
  * Desktop execute, ils ne peuvent pas y fonctionner.
+ * `"none"` = slot non configuré (sentinelle locale, jamais envoyée).
  */
 export type LlmProviderId =
+  | typeof UNCONFIGURED_PROVIDER
   | "anthropic"
   | "openai"
   | "openai-realtime"
@@ -66,6 +77,7 @@ export type LlmProviderId =
 
 /** Providers TTS configurables, alignes sur le catalogue Web (`TTS_PROVIDER_OPTIONS`). */
 export type TtsProviderId =
+  | typeof UNCONFIGURED_PROVIDER
   | "kokoro"
   | "elevenlabs"
   | "deepgram"
@@ -85,6 +97,7 @@ export type TtsProviderId =
 
 /** Providers STT configurables, alignes sur le catalogue Web (`STT_PROVIDER_OPTIONS`). */
 export type SttProviderId =
+  | typeof UNCONFIGURED_PROVIDER
   | "distil-whisper"
   | "deepgram"
   | "elevenlabs"
@@ -98,7 +111,9 @@ export type SttProviderId =
  * Contraintes :
  * - `model` est obligatoire (le Desktop doit savoir quoi executer) ;
  * - `endpoint` : `null` = endpoint par defaut du provider ;
- * - `voiceId` : pertinent surtout pour TTS ; `null` = voix par defaut.
+ * - `voiceId` : pertinent surtout pour TTS ; `null` = voix par defaut ;
+ * - `provider === "none"` : slot non configuré. `model`/`endpoint`/`voiceId`
+ *   sont alors ignorés (normalisés à `""`/`null`/`null`) et non exigés.
  *
  * Conformement a D1, aucun champ de credential n'existe dans ce type.
  */

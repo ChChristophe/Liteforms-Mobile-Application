@@ -427,6 +427,18 @@ la configuration ordinaire ; aucune des deux couches ne doit recevoir de
 secret. `AGENTS.md` (paragraphe "stocke les credentials") devra etre corrige
 pour refléter cette decision au moment de la Phase 3.
 
+#### Statut D1 — 17/09/2026 : MISE EN ŒUVRE (non validée terrain)
+
+La saisie/transfert de clé est implémentée de bout en bout : `stores/credentialDraftStore`
+(état transitoire, jamais persisté), `postCredential`/`getProviderStatus` dans
+`lib/network/deviceClient.ts`, champ clé sur l'écran `app/(setup)/providers.tsx`
+(affiché seulement si le provider requiert une clé), écran « rien de pré-activé »
+(état `"none"`, envoi bloqué tant qu'un slot est vide, `serializeDeviceConfig`
+refuse `"none"`). Contrat : `protocol/DEVICE_API.md` §`POST /api/credentials` +
+§`GET /api/provider-status`. Reste : validation terrain (voir `PLAN_DIRECTEUR.md`
+§13.1 du repo Electron) + polish UI de l'écran providers (l'utilisateur le trouve
+« mieux » mais pas pleinement satisfait de la finition).
+
 ### D2 — Contrat VRM
 
 Decision par defaut recommandee :

@@ -2,11 +2,17 @@ import {
   DEVICE_CONFIG_VERSION,
   type DeviceConfig,
 } from "../../types/config";
+import { serializeDeviceConfig } from "../config/serialization";
+import { hasUnconfiguredProvider } from "../config/validation";
 import type {
   DesktopHealthCheck,
   DesktopHealthResponse,
   DeviceConfigAck,
   DeviceConfigSendResult,
+  CredentialAck,
+  CredentialSendResult,
+  ProviderStatusResponse,
+  ProviderStatusResult,
   ProvisioningHealthResponse,
   ProvisioningStatusResponse,
   VrmListResult,
@@ -551,6 +557,12 @@ export async function sendDeviceConfig(
   const coordinates = validateHostPort(host, port);
   if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
 
+  // Garde défensive : "none" est un état d'édition local, JAMAIS envoyé sur
+  // le fil (l'appliance n'a pas à le gérer). Doublée par `serializeDeviceConfig`.
+  if (hasUnconfiguredProvider(config)) {
+    return { ok: false, error: "Choisis un provider pour LLM, TTS et STT avant l'envoi." };
+  }
+
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -560,7 +572,7 @@ export async function sendDeviceConfig(
         method: "POST",
         signal: controller.signal,
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: serializeDeviceConfig(config),
       }
     );
     const body: unknown = await response.json().catch(() => null);
@@ -659,6 +671,177 @@ export async function fetchVrmList(
     }
     const parsed = parseVrmList(await response.json());
     return parsed.ok ? parsed : { ok: false, error: parsed.error };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Valide le corps JSON de `POST /api/credentials` en succes (protocole
+ * 17/09/2026), sans lui faire confiance : `ok !== true`, `provider` non
+ * textuel, `configured` non booleen ou `maskedKey` ni chaine ni null sont
+ * des erreurs de payload. La cle reelle ne doit JAMAIS apparaitre ici.
+ *
+ * @param value corps, typiquement `await response.json()`.
+ */
+export function parseCredentialAck(
+  value: unknown
+): { ok: true; ack: CredentialAck } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse Desktop non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (
+    r.ok !== true ||
+    typeof r.provider !== "string" ||
+    r.provider.length === 0 ||
+    typeof r.configured !== "boolean" ||
+    (r.maskedKey !== null && typeof r.maskedKey !== "string")
+  ) {
+    return { ok: false, error: "Accusé de réception de clé Desktop invalide." };
+  }
+  return {
+    ok: true,
+    ack: {
+      ok: true,
+      provider: r.provider,
+      configured: r.configured,
+      maskedKey: r.maskedKey as string | null,
+    },
+  };
+}
+
+/**
+ * Envoie UNE cle API de provider a l'appliance : `POST /api/credentials`
+ * (protocole 17/09/2026, decision D1). La cle ne transite JAMAIS par
+ * `device-config` et n'est jamais persistee sur Mobile.
+ *
+ * Erreurs : 400 contractuel `{ok:false, code: "UNKNOWN_PROVIDER" |
+ * "INVALID_FIELD"}` retourne le code ; la cle n'apparait jamais dans les
+ * messages d'erreur (le corps n'est jamais journalise ni rediffuse).
+ *
+ * @param payload `provider` + `apiKey` (jamais loggee).
+ * @param timeoutMs delai max avant `timeout` (4000 ms par defaut).
+ */
+export async function postCredential(
+  host: string,
+  port: number,
+  payload: { provider: string; apiKey: string },
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<CredentialSendResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${buildDesktopUrl(host, port)}/api/credentials`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: payload.provider, apiKey: payload.apiKey }),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    if (response.ok) {
+      const parsed = parseCredentialAck(body);
+      if (parsed.ok) return parsed.ack;
+      return { ok: false, error: parsed.error };
+    }
+    // Erreur contractuelle attendue : {ok:false, code} (sans echo de cle).
+    const r = body as Record<string, unknown> | null;
+    if (r !== null && r.ok === false && typeof r.code === "string") {
+      return { ok: false, error: r.code };
+    }
+    return { ok: false, error: `HTTP ${response.status} pendant l'envoi de la clé.` };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/** Valide le statut d'un slot (llm/tts/stt), ou `null` si non conforme. */
+function parseProviderSlotStatus(value: unknown): ProviderStatusResponse["providers"]["llm"] | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.provider !== "string" ||
+    typeof v.configured !== "boolean" ||
+    (v.maskedKey !== null && typeof v.maskedKey !== "string")
+  ) {
+    return null;
+  }
+  return {
+    provider: v.provider,
+    configured: v.configured,
+    maskedKey: v.maskedKey as string | null,
+  };
+}
+
+/**
+ * Valide le corps JSON de `GET /api/provider-status` sans lui faire confiance :
+ * `ok !== true` ou un slot non conforme sont des erreurs de payload. `maskedKey`
+ * ne doit jamais contenir une cle reelle (masque `sk-****` uniquement).
+ *
+ * @param value corps, typiquement `await response.json()`.
+ */
+export function parseProviderStatus(
+  value: unknown
+): { ok: true; status: ProviderStatusResponse } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse Desktop non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (typeof r.providers !== "object" || r.providers === null) {
+    return { ok: false, error: "Statut providers Desktop invalide." };
+  }
+  const p = r.providers as Record<string, unknown>;
+  const llm = parseProviderSlotStatus(p.llm);
+  const tts = parseProviderSlotStatus(p.tts);
+  const stt = parseProviderSlotStatus(p.stt);
+  if (r.ok !== true || llm === null || tts === null || stt === null) {
+    return { ok: false, error: "Statut providers Desktop invalide." };
+  }
+  return { ok: true, status: { ok: true, providers: { llm, tts, stt } } };
+}
+
+/**
+ * Interroge le statut des providers de l'appliance :
+ * `GET /api/provider-status` (protocole v1). Ne renvoie que `configured` et
+ * `maskedKey` (jamais de cle reelle).
+ *
+ * @param host IPv4 du Desktop.
+ * @param port port HTTP du Desktop.
+ * @param timeoutMs delai max avant timeout (4000 ms par defaut).
+ */
+export async function getProviderStatus(
+  host: string,
+  port: number,
+  timeoutMs: number = HEALTH_TIMEOUT_MS
+): Promise<ProviderStatusResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${buildDesktopUrl(host, port)}/api/provider-status`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status} sur le statut providers.` };
+    }
+    const parsed = parseProviderStatus(await response.json());
+    return parsed.ok ? parsed.status : { ok: false, error: parsed.error };
   } catch (error) {
     return {
       ok: false,

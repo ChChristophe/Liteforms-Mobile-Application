@@ -1,5 +1,5 @@
 import { DEVICE_CONFIG_VERSION, type DeviceConfig } from "../../types/config";
-import { validateDeviceConfig } from "./validation";
+import { hasUnconfiguredProvider, validateDeviceConfig } from "./validation";
 
 /**
  * Serialise une configuration pour envoi au Desktop ou stockage local.
@@ -8,10 +8,20 @@ import { validateDeviceConfig } from "./validation";
  * l'objet source sont perdus volontairement) et aucune donnee secrete : le
  * type `DeviceConfig` n'en porte pas (D1).
  *
- * @param config configuration complete, suposee validee en amont.
+ * Garde « rien de pré-activé » : une config contenant un slot `"none"` est
+ * VALIDE à l'édition mais ne doit JAMAIS partir sur le fil (l'appliance n'a
+ * pas à gérer la sentinelle). `serializeDeviceConfig` la refuse donc.
+ *
+ * @param config configuration complete, supposee validee en amont.
  * @returns representation JSON stable, pret pour `POST /api/device-config`.
+ * @throws si un slot provider est encore `"none"` (config non envoyable).
  */
 export function serializeDeviceConfig(config: DeviceConfig): string {
+  if (hasUnconfiguredProvider(config)) {
+    throw new Error(
+      "refusing to serialize a config with an unconfigured provider (\"none\")"
+    );
+  }
   return JSON.stringify(config);
 }
 

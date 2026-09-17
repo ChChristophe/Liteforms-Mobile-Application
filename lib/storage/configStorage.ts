@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { DeviceConfig } from "../../types/config";
-import { parseDeviceConfig, serializeDeviceConfig } from "../config/serialization";
+import { parseDeviceConfig } from "../config/serialization";
 import { validateDeviceConfig } from "../config/validation";
 
 /**
@@ -54,7 +54,10 @@ export async function saveStoredDeviceConfig(config: DeviceConfig): Promise<void
   if (!result.ok) {
     throw new Error(`refusing to persist invalid config: ${result.errors.join("; ")}`);
   }
-  await AsyncStorage.setItem(CONFIG_STORAGE_KEY, serializeDeviceConfig(config));
+  // Serialisation directe : l'etat d'edition local peut legitiment contenir
+  // la sentinelle "none" (validée ci-dessus, mais non envoyable). On n'utilise
+  // donc PAS serializeDeviceConfig ici, dont la garde refuse "none" (wire-only).
+  await AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
 }
 
 /**

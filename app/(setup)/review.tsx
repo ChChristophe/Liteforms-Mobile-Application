@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { type DeviceConfig } from '../../types/config';
-import { validateDeviceConfig } from '../../lib/config/validation';
+import { type DeviceConfig, UNCONFIGURED_PROVIDER } from '../../types/config';
+import { hasUnconfiguredProvider, validateDeviceConfig } from '../../lib/config/validation';
+import { getProviderStatus, postCredential } from '../../lib/network/deviceClient';
 import { useConfigStore } from '../../stores/configStore';
 import { useConnectionStore } from '../../stores/connectionStore';
+import { useCredentialDraftStore } from '../../stores/credentialDraftStore';
+import type { ProviderStatusResponse } from '../../types/device';
 
 /**
  * Recapitulatif navigable de la configuration (Phase 3 etape 6).
@@ -77,30 +80,90 @@ function SectionLink({
   );
 }
 
+/**
+ * Pousse les clés API des providers sélectionnés (D1) : `POST /api/credentials`
+ * pour chaque provider distinct ayant une clé saisie dans le brouillon
+ * transitoire. Jamais via device-config, jamais persisté (la clé ne vit que
+ * dans `credentialDraftStore`, en mémoire).
+ *
+ * @returns les erreurs d'envoi par provider (vide = tout est parti).
+ */
+async function pushCredentials(
+  host: string,
+  port: number,
+  config: DeviceConfig
+): Promise<string[]> {
+  const selected = (['llm', 'tts', 'stt'] as const).map(
+    (slot) => config.providers[slot].provider
+  );
+  const distinct = Array.from(
+    new Set(selected.filter((id) => id !== UNCONFIGURED_PROVIDER))
+  );
+  const keys = useCredentialDraftStore.getState().keys;
+  const errors: string[] = [];
+  for (const provider of distinct) {
+    const apiKey = keys[provider];
+    if (apiKey !== undefined && apiKey.trim().length > 0) {
+      const result = await postCredential(host, port, {
+        provider,
+        apiKey: apiKey.trim(),
+      });
+      if (!result.ok) errors.push(`${provider} : ${result.error}`);
+    }
+  }
+  return errors;
+}
+
+/** Interroge le statut providers (configured/maskedKey), sans erreur fatale. */
+async function fetchProviderStatusSafe(
+  host: string,
+  port: number
+): Promise<ProviderStatusResponse | null> {
+  const result = await getProviderStatus(host, port);
+  return result.ok ? result : null;
+}
+
 export default function ReviewScreen() {
   const config = useConfigStore((state) => state.config);
   const resetConfig = useConfigStore((state) => state.resetConfig);
   const sendConfig = useConnectionStore((state) => state.sendConfig);
   const connectedDesktop = useConnectionStore((state) => state.connectedDesktop);
   const validation = validateDeviceConfig(config);
+  // Un slot encore "none" est VALIDE mais non envoyable : on bloque l'envoi.
+  const unconfigured = hasUnconfiguredProvider(config);
+  const sendable = validation.ok && !unconfigured;
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendAck, setSendAck] = useState<{
     appliedAt: string;
     warnings: string[];
   } | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
 
   const handleSend = async () => {
-    if (!validation.ok || sending) return;
+    if (!validation.ok || unconfigured || sending) return;
     setSending(true);
     setSendError(null);
     setSendAck(null);
+    setProviderStatus(null);
     try {
       const result = await sendConfig(validation.config);
-      if (result.ok) {
-        setSendAck({ appliedAt: result.appliedAt, warnings: result.warnings });
-      } else {
+      if (!result.ok) {
         setSendError(result.error);
+        return;
+      }
+      setSendAck({ appliedAt: result.appliedAt, warnings: result.warnings });
+
+      // Clés API (D1) : envoi séparé APRES device-config, jamais persisté.
+      const { host, port } = useConnectionStore.getState();
+      if (host !== null && port !== null) {
+        const credentialErrors = await pushCredentials(host, port, validation.config);
+        if (credentialErrors.length > 0) {
+          setSendError(`Clés API non envoyées : ${credentialErrors.join(' ; ')}`);
+        }
+        // Retour de statut (configured/maskedKey), optionnel mais recommandé.
+        const status = await fetchProviderStatusSafe(host, port);
+        setProviderStatus(status);
       }
     } catch (error) {
       // sendConfig ne doit jamais lever, mais un crash ne doit pas laisser
@@ -118,16 +181,21 @@ export default function ReviewScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View
-          style={[styles.statusCard, validation.ok ? styles.statusOk : styles.statusError]}
+          style={[styles.statusCard, sendable ? styles.statusOk : styles.statusError]}
         >
           <Text style={styles.statusTitle}>
-            {validation.ok ? 'Configuration complète et valide' : 'Configuration incomplète'}
+            {sendable ? 'Configuration complète et valide' : 'Configuration incomplète'}
           </Text>
           {!validation.ok && validation.errors.map((error) => (
             <Text key={error} style={styles.errorLine}>
               • {error}
             </Text>
           ))}
+          {validation.ok && unconfigured && (
+            <Text style={styles.errorLine}>
+              • Choisis un provider pour LLM, TTS et STT avant l'envoi.
+            </Text>
+          )}
         </View>
 
         <SectionLink href="/character" title="Identité">
@@ -169,8 +237,11 @@ export default function ReviewScreen() {
             return (
               <Text key={slot} style={styles.detail}>
                 <Text style={styles.slotPrefix}>{slot.toUpperCase()} — </Text>
-                {selection.provider} · {selection.model || '⚠ modèle requis'}
-                {selection.voiceId ? ` — voix ${selection.voiceId}` : ''}
+                {selection.provider === UNCONFIGURED_PROVIDER
+                  ? 'Non configuré'
+                  : `${selection.provider} · ${selection.model || '⚠ modèle requis'}${
+                      selection.voiceId ? ` — voix ${selection.voiceId}` : ''
+                    }`}
               </Text>
             );
           })}
@@ -179,10 +250,10 @@ export default function ReviewScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.sendButton,
-            (!validation.ok || connectedDesktop === null || sending) && styles.sendDisabled,
+            (!sendable || connectedDesktop === null || sending) && styles.sendDisabled,
             pressed && styles.pressed,
           ]}
-          disabled={!validation.ok || connectedDesktop === null || sending}
+          disabled={!sendable || connectedDesktop === null || sending}
           accessibilityRole="button"
           accessibilityLabel="Envoyer la configuration au Desktop"
           onPress={handleSend}
@@ -207,6 +278,20 @@ export default function ReviewScreen() {
                 ⚠ {warning}
               </Text>
             ))}
+          </View>
+        )}
+        {providerStatus !== null && (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Statut des providers</Text>
+            {(['llm', 'tts', 'stt'] as const).map((slot) => {
+              const s = providerStatus.providers[slot];
+              return (
+                <Text key={slot} style={styles.detail}>
+                  <Text style={styles.slotPrefix}>{slot.toUpperCase()} — </Text>
+                  {s.provider} · {s.configured ? `configuré (${s.maskedKey ?? 'masqué'})` : 'non configuré'}
+                </Text>
+              );
+            })}
           </View>
         )}
         {sendError !== null && (

@@ -158,3 +158,46 @@ export type VrmSummary = {
 export type VrmListResult =
   | { ok: true; vrms: VrmSummary[] }
   | { ok: false; error: string };
+
+/**
+ * Reponse de `POST /api/credentials` (protocole 17/09/2026). N'echoe JAMAIS
+ * la cle : seule la forme masquee `maskedKey` (type `sk-****`) est exposee.
+ */
+export type CredentialAck = {
+  /** `true` : la cle a ete acceptee et stockee cote appliance. */
+  ok: true;
+  /** Identifiant du provider concerne. */
+  provider: string;
+  /** `true` si l'appliance possede desormais une cle pour ce provider. */
+  configured: boolean;
+  /** Forme masquee de la cle, ou `null` si aucune. */
+  maskedKey: string | null;
+};
+
+/** Resultat d'envoi d'une cle provider au Desktop, exploitable par l'UI. */
+export type CredentialSendResult = CredentialAck | { ok: false; error: string };
+
+/** Statut d'un slot (llm/tts/stt) dans `GET /api/provider-status`. */
+export type ProviderSlotStatus = {
+  /** Identifiant du provider configure pour ce slot. */
+  provider: string;
+  /** `true` si une cle est disponible cote appliance. */
+  configured: boolean;
+  /** Forme masquee de la cle, ou `null`. */
+  maskedKey: string | null;
+};
+
+/** Reponse de `GET /api/provider-status` (protocole v1). */
+export type ProviderStatusResponse = {
+  /** `true` : statut conforme du Desktop. */
+  ok: true;
+  /** Statut par slot, jamais de cle reelle (masquee uniquement). */
+  providers: {
+    llm: ProviderSlotStatus;
+    tts: ProviderSlotStatus;
+    stt: ProviderSlotStatus;
+  };
+};
+
+/** Resultat de `getProviderStatus`, exploitable par l'UI. */
+export type ProviderStatusResult = ProviderStatusResponse | { ok: false; error: string };

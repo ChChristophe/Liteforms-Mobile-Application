@@ -28,6 +28,17 @@ import { useConfigStore } from "../../stores/configStore";
 describe("AvatarPreview « Réinitialiser »", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Config envoyable : providers reels (le round-trip wire refuse la
+    // sentinelle "none" des defauts — test isole de la config providers).
+    useConfigStore.getState().updateProvider("llm", {
+      provider: "openai", model: "gpt-5.5", endpoint: null, voiceId: null,
+    });
+    useConfigStore.getState().updateProvider("tts", {
+      provider: "elevenlabs", model: "flash", endpoint: null, voiceId: null,
+    });
+    useConfigStore.getState().updateProvider("stt", {
+      provider: "deepgram", model: "nova-3", endpoint: null, voiceId: null,
+    });
     // Pose non neutre issue d'un reglage utilisateur (bornes du contrat).
     useConfigStore.getState().updateAvatar({
       pose: { avatarYaw: 1.2, alcoveYaw: -0.4, zoom: 2.1, depth: 0.2 },

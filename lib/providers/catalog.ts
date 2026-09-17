@@ -32,6 +32,13 @@ export type ProviderCatalogEntry<P extends string = string> = {
   models: readonly string[] | null;
   /** Voix connues ; `null` = saisie libre ou non applicable. */
   voices: readonly string[] | null;
+  /**
+   * `true` si le provider exige une cle API saisie sur Mobile puis transferee
+   * une seule fois a l'appliance via `POST /api/credentials` (D1). Quand
+   * `true`, l'ecran affiche un champ cle ; sinon aucun (ex. openclaw : token
+   * lu automatiquement par l'appliance, openai-codex : appairage appareil).
+   */
+  requiresKey: boolean;
 };
 
 /** LLM testes, charte Web — execution navigateur exclue. */
@@ -39,6 +46,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "anthropic",
     label: "Anthropic API",
+    requiresKey: true,
     defaultModel: "claude-opus-4-7",
     defaultEndpoint: "https://api.anthropic.com",
     defaultVoice: null,
@@ -56,6 +64,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "openai",
     label: "OpenAI API",
+    requiresKey: true,
     defaultModel: "gpt-5.5",
     defaultEndpoint: "https://api.openai.com/v1",
     defaultVoice: null,
@@ -65,6 +74,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "openai-realtime",
     label: "OpenAI Realtime (TTS+STT)",
+    requiresKey: true,
     defaultModel: "gpt-realtime-2",
     defaultEndpoint: "wss://api.openai.com/v1/realtime",
     defaultVoice: "coral",
@@ -84,6 +94,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "openai-codex",
     label: "OpenAI Codex",
+    requiresKey: false,
     defaultModel: "gpt-5.5",
     defaultEndpoint: "https://chatgpt.com/backend-api/codex",
     defaultVoice: null,
@@ -93,6 +104,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "google",
     label: "Google AI Studio",
+    requiresKey: true,
     defaultModel: "gemini-3.1-pro-preview",
     defaultEndpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
     defaultVoice: null,
@@ -112,6 +124,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "google-live",
     label: "Google Live (TTS+STT)",
+    requiresKey: true,
     defaultModel: "gemini-2.5-flash-native-audio-preview-12-2025",
     defaultEndpoint:
       "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
@@ -159,6 +172,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
+    requiresKey: true,
     defaultModel: "openai/gpt-5.5",
     defaultEndpoint: "https://openrouter.ai/api/v1",
     defaultVoice: null,
@@ -168,6 +182,7 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
   {
     id: "openclaw",
     label: "OpenClaw Gateway",
+    requiresKey: false,
     defaultModel: "openclaw/default",
     defaultEndpoint: "http://127.0.0.1:18789/v1",
     defaultVoice: null,
@@ -181,6 +196,7 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
   {
     id: "elevenlabs",
     label: "ElevenLabs",
+    requiresKey: true,
     defaultModel: "eleven_flash_v2_5",
     defaultEndpoint: "https://api.elevenlabs.io/v1",
     defaultVoice: "CwhRBWXzGAHq8TQ4Fs17",
@@ -196,6 +212,7 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
   {
     id: "deepgram",
     label: "Deepgram",
+    requiresKey: true,
     defaultModel: null,
     defaultEndpoint: "https://api.deepgram.com/v1",
     defaultVoice: "aura-asteria-en",
@@ -205,6 +222,7 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
   {
     id: "openai",
     label: "OpenAI",
+    requiresKey: true,
     defaultModel: "gpt-4o-mini-tts",
     defaultEndpoint: "https://api.openai.com/v1",
     defaultVoice: "coral",
@@ -229,6 +247,7 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
   {
     id: "google",
     label: "Google",
+    requiresKey: true,
     defaultModel: "gemini-3.1-flash-tts-preview",
     defaultEndpoint: "https://generativelanguage.googleapis.com",
     defaultVoice: "Kore",
@@ -273,6 +292,7 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
+    requiresKey: true,
     defaultModel: "hexgrad/kokoro-82m",
     defaultEndpoint: "https://openrouter.ai/api/v1",
     defaultVoice: "af_alloy",
@@ -291,6 +311,7 @@ export const STT_PROVIDERS: readonly ProviderCatalogEntry<SttProviderId>[] = [
   {
     id: "deepgram",
     label: "Deepgram",
+    requiresKey: true,
     defaultModel: "nova-3",
     defaultEndpoint: "https://api.deepgram.com/v1",
     defaultVoice: null,
@@ -300,6 +321,7 @@ export const STT_PROVIDERS: readonly ProviderCatalogEntry<SttProviderId>[] = [
   {
     id: "elevenlabs",
     label: "ElevenLabs",
+    requiresKey: true,
     defaultModel: "scribe_v2",
     defaultEndpoint: "https://api.elevenlabs.io/v1",
     defaultVoice: null,
@@ -309,6 +331,7 @@ export const STT_PROVIDERS: readonly ProviderCatalogEntry<SttProviderId>[] = [
   {
     id: "openai",
     label: "OpenAI",
+    requiresKey: true,
     defaultModel: "gpt-4o-transcribe",
     defaultEndpoint: "https://api.openai.com/v1",
     defaultVoice: null,
@@ -333,4 +356,36 @@ export function findCatalogEntry<P extends string>(
   providerId: string
 ): ProviderCatalogEntry<P> | undefined {
   return catalog.find((entry) => entry.id === providerId);
+}
+
+/**
+ * Tous les providers visibles, tous slots confondus. Les ids partages
+ * (ex. `openai` en llm/tts/stt) portent un `requiresKey` homogene ; la
+ * premiere occurrence suffit pour la recherche.
+ */
+const ALL_PROVIDER_ENTRIES: readonly ProviderCatalogEntry[] = [
+  ...LLM_PROVIDERS,
+  ...TTS_PROVIDERS,
+  ...STT_PROVIDERS,
+];
+
+/**
+ * Retrouve l'entree d'un provider dans l'ensemble des catalogues visibles.
+ *
+ * Utile pour le champ cle API, qui est keye par provider (pas par slot) :
+ * `openai` sert aux trois slots avec UNE seule cle (dedoublonnage).
+ *
+ * @returns l'entree, ou `undefined` si l'id n'est visible dans aucun slot.
+ */
+export function findProviderEntry(providerId: string): ProviderCatalogEntry | undefined {
+  return ALL_PROVIDER_ENTRIES.find((entry) => entry.id === providerId);
+}
+
+/**
+ * Indique si un provider (tous slots confondus) exige une cle API.
+ * @returns `true` si le provider doit afficher un champ cle ; un id absent
+ *   des catalogues visibles retourne `false` (defaut sur : pas de champ).
+ */
+export function providerRequiresKey(providerId: string): boolean {
+  return findProviderEntry(providerId)?.requiresKey ?? false;
 }

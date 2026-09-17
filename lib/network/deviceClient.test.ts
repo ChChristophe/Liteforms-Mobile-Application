@@ -11,6 +11,10 @@ import {
   resetProvisioning,
   fetchVrmList,
   parseVrmList,
+  parseCredentialAck,
+  postCredential,
+  parseProviderStatus,
+  getProviderStatus,
 } from "./deviceClient";
 import { DeviceNetworkError, redactText } from "./networkErrors";
 import { DEVICE_CONFIG_VERSION, type DeviceConfig } from "../../types/config";
@@ -527,5 +531,197 @@ describe("fetchProvisioningStatus", () => {
     if (result.reachable && "invalid" in result) {
       expect(result.invalid).toBe(true);
     }
+  });
+});
+
+describe("parseCredentialAck (17/09/2026)", () => {
+  it("parse un accuse conforme (jamais d'echo de cle)", () => {
+    const result = parseCredentialAck({
+      ok: true,
+      provider: "openai",
+      configured: true,
+      maskedKey: "sk-****",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.ack).toEqual({
+        ok: true,
+        provider: "openai",
+        configured: true,
+        maskedKey: "sk-****",
+      });
+    }
+  });
+
+  it("accepte maskedKey null (non configure)", () => {
+    const result = parseCredentialAck({
+      ok: true,
+      provider: "openai",
+      configured: false,
+      maskedKey: null,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuse ok=false, configured non booleen ou payload non objet", () => {
+    expect(parseCredentialAck({ ok: false }).ok).toBe(false);
+    expect(parseCredentialAck(null).ok).toBe(false);
+    expect(
+      parseCredentialAck({ ok: true, provider: "openai", configured: "yes", maskedKey: null }).ok
+    ).toBe(false);
+  });
+});
+
+describe("postCredential (17/09/2026)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("poste provider + apiKey sur /api/credentials et parse l'accuse", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            provider: "openai",
+            configured: true,
+            maskedKey: "sk-****",
+          }),
+          { status: 200 }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postCredential("192.168.1.42", 43178, {
+      provider: "openai",
+      apiKey: "sk-secret",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      provider: "openai",
+      configured: true,
+      maskedKey: "sk-****",
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(url).toBe("http://192.168.1.42:43178/api/credentials");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ provider: "openai", apiKey: "sk-secret" });
+  });
+
+  it("retourne le code UNKNOWN_PROVIDER sur un 400 contractuel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ok: false, code: "UNKNOWN_PROVIDER" }), { status: 400 })
+      )
+    );
+    const result = await postCredential("192.168.1.42", 43178, {
+      provider: "nope",
+      apiKey: "sk",
+    });
+    expect(result).toEqual({ ok: false, error: "UNKNOWN_PROVIDER" });
+  });
+
+  it("retourne le code INVALID_FIELD sur un 400 contractuel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ok: false, code: "INVALID_FIELD" }), { status: 400 })
+      )
+    );
+    const result = await postCredential("192.168.1.42", 43178, {
+      provider: "openai",
+      apiKey: "",
+    });
+    expect(result).toEqual({ ok: false, error: "INVALID_FIELD" });
+  });
+});
+
+describe("parseProviderStatus (protocole v1)", () => {
+  it("parse llm/tts/stt sans cle reelle", () => {
+    const result = parseProviderStatus({
+      ok: true,
+      providers: {
+        llm: { provider: "openai", configured: true, maskedKey: "sk-****" },
+        tts: { provider: "elevenlabs", configured: false, maskedKey: null },
+        stt: { provider: "deepgram", configured: false, maskedKey: null },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.status.providers.llm.configured).toBe(true);
+      expect(result.status.providers.tts.maskedKey).toBeNull();
+    }
+  });
+
+  it("refuse un slot manquant, ok=false ou payload non objet", () => {
+    expect(parseProviderStatus({ ok: true }).ok).toBe(false);
+    expect(parseProviderStatus(null).ok).toBe(false);
+    expect(
+      parseProviderStatus({
+        ok: true,
+        providers: { llm: null, tts: null, stt: null },
+      }).ok
+    ).toBe(false);
+  });
+});
+
+describe("getProviderStatus (protocole v1)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("recupere et parse le statut sur /api/provider-status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            providers: {
+              llm: { provider: "openai", configured: true, maskedKey: "sk-****" },
+              tts: { provider: "elevenlabs", configured: false, maskedKey: null },
+              stt: { provider: "deepgram", configured: false, maskedKey: null },
+            },
+          }),
+          { status: 200 }
+        )
+      )
+    );
+    const result = await getProviderStatus("192.168.1.42", 43178);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.providers.llm.maskedKey).toBe("sk-****");
+    }
+  });
+
+  it("retourne une erreur sur un HTTP non-2xx", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ ok: false }), { status: 500 }))
+    );
+    const result = await getProviderStatus("192.168.1.42", 43178);
+    expect(result).toEqual({
+      ok: false,
+      error: "HTTP 500 sur le statut providers.",
+    });
+  });
+
+  it("retourne une erreur reseau redactee sur Desktop injoignable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Network request failed");
+      })
+    );
+    const result = await getProviderStatus("192.168.1.42", 43178);
+    expect(result).toEqual({
+      ok: false,
+      error: "Desktop injoignable : vérifie l'IP, le port et le même Wi-Fi.",
+    });
   });
 });
