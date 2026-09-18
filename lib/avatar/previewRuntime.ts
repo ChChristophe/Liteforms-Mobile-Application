@@ -86,6 +86,20 @@ export type PreviewHandle = {
    */
   setMood: (mood: AvatarMood | null) => void;
   /**
+   * Joue une animation VRMA arbitraire a chaud (apercu local), sans remonter
+   * le GLView ni recharger le VRM : parse du buffer -> clip -> crossfade
+   * depuis l'animation courante -> retour automatique a l'idle en fin de
+   * clip (LoopOnce). Un appui pendant une lecture remplace l'animation
+   * precedente sans laisser d'action/resource orpheline.
+   *
+   * @param buffer binaire VRMA (`.vrma`), deja lu par l'appelant.
+   * @returns `true` si l'animation a ete lancee ; `false` si le runtime est
+   *   dispose ou n'a pas de mixer (aucune animation de base).
+   * @throws si le buffer n'est pas un VRMA lisible (l'appelant affiche
+   *   l'erreur, le preview reste sur l'idle).
+   */
+  playAnimation: (buffer: ArrayBuffer) => Promise<boolean>;
+  /**
    * Zone ecran de l'avatar, en fractions du GLView autour du centre
    * (l'avatar reste centre : la camera vise le centre de sa bbox). Sert au
    * composant RN pour decider si un drag tourne l'avatar ou l'alcove.
@@ -545,27 +559,82 @@ export async function startPreviewRuntime(
   }
 
   // --- animation VRMA ---------------------------------------------------
+  // Le mixer porte l'idle en boucle ; `playAnimation` crossfade une animation
+  // ponctuelle (LoopOnce) puis revient a l'idle sur l'evenement `finished`.
+  // Le GLView n'est jamais remonte : meme contexte GL, memes ressources.
   let mixer: THREE.AnimationMixer | null = null;
+  let idleClip: THREE.AnimationClip | null = null;
+  let idleAction: THREE.AnimationAction | null = null;
+  let oneShotAction: THREE.AnimationAction | null = null;
+  /**
+   * Tous les clips ponctuels joues dans la session. Ils ne sont PAS liberes
+   * pendant la lecture (uncache prematuré = pop du crossfade en cours) : la
+   * liberation est groupee au dispose, apres arret de tous les acteurs.
+   */
+  const oneShotClips: THREE.AnimationClip[] = [];
+  /** Duree du crossfade idle <-> animation ponctuelle (secondes). */
+  const ANIMATION_FADE_SECONDS = 0.3;
+
   const animationLoader = new GLTFLoader();
   animationLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
-  const vrmaGltf = await new Promise((resolve, reject) => {
-    animationLoader.parse(buffers.animation, "", resolve, reject);
-  });
-  // Le plugin VRMAnimationLoaderPlugin ecrit `userData.vrmAnimations` (PLURIEL,
-  // tableau), pas `vrmAnimation`. Lire le mauvais nom => aucune animation.
-  const vrma = (
-    vrmaGltf as { userData: { vrmAnimations?: VRMAnimation[] } }
-  ).userData.vrmAnimations?.[0];
-  if (vrma) {
+  /**
+   * Parse un buffer VRMA et retourne son animation. Le plugin ecrit
+   * `userData.vrmAnimations` (PLURIEL, tableau), pas `vrmAnimation`.
+   */
+  function parseVrmAnimation(buffer: ArrayBuffer): Promise<VRMAnimation | null> {
+    return new Promise((resolve, reject) => {
+      animationLoader.parse(
+        buffer,
+        "",
+        (gltf) => {
+          const animations = (
+            gltf as { userData: { vrmAnimations?: VRMAnimation[] } }
+          ).userData.vrmAnimations;
+          resolve(animations?.[0] ?? null);
+        },
+        reject
+      );
+    });
+  }
+
+  /** Retour a l'idle une fois l'animation ponctuelle terminee (LoopOnce). */
+  function onAnimationFinished(event: { action: THREE.AnimationAction }): void {
+    if (disposed || event.action !== oneShotAction) return;
+    const finished = oneShotAction;
+    oneShotAction = null;
+    if (mixer !== null && idleAction !== null) {
+      idleAction.reset();
+      idleAction.setLoop(THREE.LoopRepeat, Infinity);
+      idleAction.setEffectiveTimeScale(1);
+      idleAction.setEffectiveWeight(1);
+      idleAction.play();
+      if (finished !== null) {
+        idleAction.crossFadeFrom(finished, ANIMATION_FADE_SECONDS, true);
+      }
+    }
+  }
+
+  // Idle de demarrage : joue en boucle (comportement Phase 4 inchange).
+  const idleVrma = await parseVrmAnimation(buffers.animation);
+  if (idleVrma) {
     // three-vrm v3 : le clip passe par la fonction libre (pas une methode).
-    const clip = createVRMAnimationClip(vrma, vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]);
+    idleClip = createVRMAnimationClip(
+      idleVrma,
+      vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+    );
     mixer = new THREE.AnimationMixer(vrm.scene);
-    mixer.clipAction(clip).play();
+    idleAction = mixer.clipAction(idleClip);
+    idleAction.setLoop(THREE.LoopRepeat, Infinity);
+    idleAction.play();
+    mixer.addEventListener("finished", onAnimationFinished);
     disposables.push({
       dispose: () => {
+        mixer?.removeEventListener("finished", onAnimationFinished);
         mixer?.stopAllAction();
-        mixer?.uncacheClip(clip);
+        if (idleClip !== null) mixer?.uncacheClip(idleClip);
+        for (const clip of oneShotClips) mixer?.uncacheClip(clip);
+        oneShotClips.length = 0;
       },
     });
   }
@@ -632,6 +701,38 @@ export async function startPreviewRuntime(
       renderer.render(scene, camera);
       // Presente la framebuffer expo-gl (swap buffers equivalent, docs GLView).
       gl.endFrameEXP();
+    },
+    async playAnimation(buffer) {
+      if (disposed || mixer === null) return false;
+      const animation = await parseVrmAnimation(buffer);
+      // Le runtime a pu etre dispose pendant le parse (navigation).
+      if (disposed || mixer === null) return false;
+      if (animation === null) {
+        throw new Error("Animation VRMA invalide (aucune piste lisible).");
+      }
+      const clip = createVRMAnimationClip(
+        animation,
+        vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+      );
+      const action = mixer.clipAction(clip);
+      action.reset();
+      action.setLoop(THREE.LoopOnce, 1);
+      // Conserve la pose finale le temps du retour en fondu a l'idle.
+      action.clampWhenFinished = true;
+      action.setEffectiveTimeScale(1);
+      action.setEffectiveWeight(1);
+      action.play();
+      // Crossfade depuis l'animation visible : la ponctuelle en cours de
+      // lecture si elle existe encore, sinon l'idle. L'ancienne n'est PAS
+      // stoppee (evite un pop) : son `finished` est ignore (elle n'est plus
+      // `oneShotAction`) et son clip est libere au dispose.
+      const from = oneShotAction ?? idleAction;
+      if (from !== null && from !== action) {
+        action.crossFadeFrom(from, ANIMATION_FADE_SECONDS, true);
+      }
+      oneShotClips.push(clip);
+      oneShotAction = action;
+      return true;
     },
     setAlcoveTint(hex) {
       // No-op apres dispose : la scene est vidée, plus rien a teinter.

@@ -47,6 +47,18 @@ type PreviewStatus =
   | { kind: 'ready' }
   | { kind: 'error'; message: string };
 
+/**
+ * Demande de lecture d'une animation a chaud (apercu local uniquement : le
+ * choix n'est pas persiste dans `DeviceConfig`). Un changement d'`id`
+ * declenche la lecture du `buffer` sur le runtime courant.
+ */
+export type AnimationRequest = {
+  /** Binaire VRMA a jouer (bundle idle ou cache local). */
+  buffer: ArrayBuffer;
+  /** Identifiant monotone : un changement relance la lecture. */
+  id: number;
+};
+
 /** Props publiques du preview : callbacks de mesures pour le harnais Phase 4. */
 type AvatarPreviewProps = {
   /** Appelé une fois par montage quand la scene est prete (temps de chargement ms). */
@@ -61,6 +73,14 @@ type AvatarPreviewProps = {
    * contexte EGL). 0 = aucun reload demande.
    */
   reloadSignal?: number;
+  /**
+   * Animation a jouer a chaud (overlay d'apercu). Un nouvel `id` declenche
+   * `runtime.playAnimation` sans remonter le GLView ; si la demande arrive
+   * pendant le chargement du runtime, elle est appliquee des qu'il est pret.
+   */
+  animationRequest?: AnimationRequest | null;
+  /** Appelé si le buffer d'animation est illisible (le preview reste sur l'idle). */
+  onAnimationError?: (message: string) => void;
 };
 
 /**
@@ -91,6 +111,8 @@ export const AvatarPreview = memo(function AvatarPreview({
   onError,
   onStage,
   reloadSignal = 0,
+  animationRequest = null,
+  onAnimationError,
 }: AvatarPreviewProps = {}) {
   /** Cle de remontage : id du modele courant du store. */
   const modelRefId = useConfigStore((state) => state.config.avatar.modelRef.id);
@@ -113,6 +135,12 @@ export const AvatarPreview = memo(function AvatarPreview({
 
   /** Runtime courant ; nul tant que non charge, null apres dispose. */
   const runtimeRef = useRef<PreviewHandle | null>(null);
+  /**
+   * Derniere animation demandee. Conservee pour etre appliquee des que le
+   * runtime est pret (demande arrivee pendant le chargement) et apres un
+   * rechargement runtime (modele/resident), sans remonter le GLView.
+   */
+  const animationRequestRef = useRef<AnimationRequest | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -129,6 +157,29 @@ export const AvatarPreview = memo(function AvatarPreview({
   useEffect(() => {
     runtimeRef.current?.applyPose(pose);
   }, [pose]);
+
+  /** Signale un buffer d'animation illisible sans tuer le preview. */
+  const reportAnimationError = useCallback(
+    (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : 'Animation illisible.';
+      if (__DEV__) console.warn('[AvatarPreview] playAnimation failed', error);
+      onAnimationError?.(message);
+    },
+    [onAnimationError]
+  );
+
+  // Animation a chaud (apercu local) : joue la derniere demande si le runtime
+  // est pret ; sinon `animationRequestRef` est applique par `loadScene` des
+  // qu'il le devient. Aucun remount du GLView, aucun setState par frame.
+  useEffect(() => {
+    animationRequestRef.current = animationRequest;
+    const runtime = runtimeRef.current;
+    if (animationRequest === null || runtime === null) return;
+    void runtime
+      .playAnimation(animationRequest.buffer)
+      .catch(reportAnimationError);
+  }, [animationRequest, reportAnimationError]);
 
   // Miroirs d'affichage des sliders : suivent le store (pose persistee,
   // reset...) pendant que le drag alimente le runtime en direct.
@@ -264,6 +315,14 @@ export const AvatarPreview = memo(function AvatarPreview({
         runtime.setAlcoveTint(config.environment.alcoveColor);
         runtime.setMood(config.avatar.mood);
         runtime.applyPose(config.avatar.pose);
+        // Demande d'animation arrivee pendant le chargement : appliquee ici,
+        // sur le meme runtime (jamais un second contexte GL).
+        const pendingAnimation = animationRequestRef.current;
+        if (pendingAnimation !== null) {
+          void runtime
+            .playAnimation(pendingAnimation.buffer)
+            .catch(reportAnimationError);
+        }
         if (appStateRef.current === 'active') {
           setStatus({ kind: 'ready' });
           startLoopIfReady();
@@ -285,7 +344,7 @@ export const AvatarPreview = memo(function AvatarPreview({
         uninstallTextureSupport();
       }
     },
-    [onReady, onError, onStage, startLoopIfReady, stopLoop]
+    [onReady, onError, onStage, startLoopIfReady, stopLoop, reportAnimationError]
   );
 
   const glRef = useRef<ExpoWebGLRenderingContext | null>(null);

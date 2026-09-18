@@ -1077,6 +1077,15 @@ fil via `POST /api/device-config` (bloc `wakeWord`, protocole 18/09/2026) ;
 l'appliance applique le choix et re-arme son bridge. L'UI desktop garde sa
 propre selection, ecrasee a la reception d'une config Mobile. Tests verts.
 
+Reglages de cue (18/09/2026) : le bloc `wakeWord` porte aussi `cue`
+(`flashColor`, `blinkDurationMs`, `animationUrl`) - ecran `wake-word` pour la
+couleur (`reanimated-color-picker`) et la duree du clignotement (300-3000 ms).
+L'**animation de cue** se choisit **uniquement dans l'apercu de l'avatar** : le
+selecteur d'animation y joue l'animation a chaud ET la persiste comme
+`cue.animationUrl` (l'idle reste un apercu local, sans effet sur la cue). Les
+animations non embarquees (toutes sauf `idle_loop.vrma`) sont telechargees
+depuis l'appliance (`/animations/<f>.vrma`) et mises en cache. Tests verts.
+
 #### Gate de sortie
 
 - chaque ecran conserve le comportement fonctionnel attendu du Web ;

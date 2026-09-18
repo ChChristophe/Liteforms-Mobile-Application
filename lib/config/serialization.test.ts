@@ -40,14 +40,34 @@ describe("serializeDeviceConfig / parseDeviceConfig", () => {
   });
 
   it("transporte le bloc wakeWord sur le fil (choix seul, jamais d'audio)", () => {
-    const withWake: DeviceConfig = { ...CONFIGURED, wakeWord: { model: "hey_jarvis" } };
+    const withWake: DeviceConfig = {
+      ...CONFIGURED,
+      wakeWord: { ...DEFAULT_DEVICE_CONFIG.wakeWord, model: "hey_jarvis" },
+    };
     const parsed = JSON.parse(serializeDeviceConfig(withWake)) as DeviceConfig;
-    expect(parsed.wakeWord).toEqual({ model: "hey_jarvis" });
+    expect(parsed.wakeWord).toEqual({
+      model: "hey_jarvis",
+      cue: DEFAULT_DEVICE_CONFIG.wakeWord.cue,
+    });
   });
 
   it("envoie wakeWord.model:null quand aucun wake word n'est choisi", () => {
     const parsed = JSON.parse(serializeDeviceConfig(CONFIGURED)) as DeviceConfig;
-    expect(parsed.wakeWord).toEqual({ model: null });
+    expect(parsed.wakeWord).toEqual(DEFAULT_DEVICE_CONFIG.wakeWord);
+  });
+
+  it("transporte la cue (couleur, duree, animation) sur le fil", () => {
+    const cue = {
+      flashColor: "#ff8800",
+      blinkDurationMs: 1500,
+      animationUrl: "/animations/Spin.vrma",
+    };
+    const withCue: DeviceConfig = {
+      ...CONFIGURED,
+      wakeWord: { model: "hey_jarvis", cue },
+    };
+    const parsed = JSON.parse(serializeDeviceConfig(withCue)) as DeviceConfig;
+    expect(parsed.wakeWord.cue).toEqual(cue);
   });
 
   it("returns null for corrupted JSON without throwing", () => {

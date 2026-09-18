@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DEVICE_CONFIG } from "./defaults";
+import { DEFAULT_DEVICE_CONFIG, DEFAULT_WAKE_WORD_CUE } from "./defaults";
 import { hasUnconfiguredProvider, validateDeviceConfig } from "./validation";
-import { DEVICE_CONFIG_VERSION, WAKE_WORD_MODEL_IDS, type DeviceConfig } from "../../types/config";
+import {
+  DEVICE_CONFIG_VERSION,
+  WAKE_WORD_CUE_DEFAULT_ANIMATION_URL,
+  WAKE_WORD_CUE_DEFAULT_DURATION_MS,
+  WAKE_WORD_CUE_FLASH_COLOR,
+  WAKE_WORD_MODEL_IDS,
+  type DeviceConfig,
+} from "../../types/config";
 
 /** Config dont seul le slot LLM est renseigne (tts/stt restent "none"). */
 function realtimeWithEmptySpeech(provider: "openai-realtime" | "google-live"): DeviceConfig {
@@ -76,27 +83,125 @@ describe("validateDeviceConfig", () => {
     expect(validateDeviceConfig(bad).ok).toBe(false);
   });
 
-  it("starts without a wake word (rien de pré-activé)", () => {
-    expect(DEFAULT_DEVICE_CONFIG.wakeWord).toEqual({ model: null });
+  it("starts without a wake word and the default cue (rien de pré-activé)", () => {
+    expect(DEFAULT_DEVICE_CONFIG.wakeWord).toEqual({
+      model: null,
+      cue: DEFAULT_WAKE_WORD_CUE,
+    });
   });
 
   it("accepts each wake word model of the union", () => {
     for (const model of WAKE_WORD_MODEL_IDS) {
       const result = validateDeviceConfig({ ...DEFAULT_DEVICE_CONFIG, wakeWord: { model } });
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.config.wakeWord).toEqual({ model });
+      if (result.ok) {
+        expect(result.config.wakeWord).toEqual({ model, cue: DEFAULT_WAKE_WORD_CUE });
+      }
     }
   });
 
   it("accepts a null wake word and migrates an absent block to the default", () => {
     const nulled = { ...DEFAULT_DEVICE_CONFIG, wakeWord: { model: null } };
-    expect(validateDeviceConfig(nulled).ok).toBe(true);
+    const nulledResult = validateDeviceConfig(nulled);
+    expect(nulledResult.ok).toBe(true);
+    if (nulledResult.ok) {
+      expect(nulledResult.config.wakeWord.cue).toEqual(DEFAULT_WAKE_WORD_CUE);
+    }
     // Config stockee anterieure au 18/09/2026 : le bloc est absent.
     const legacy: Record<string, unknown> = { ...DEFAULT_DEVICE_CONFIG };
     delete legacy.wakeWord;
     const result = validateDeviceConfig(legacy);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.config.wakeWord).toEqual({ model: null });
+    if (result.ok) {
+      expect(result.config.wakeWord).toEqual({
+        model: null,
+        cue: DEFAULT_WAKE_WORD_CUE,
+      });
+    }
+  });
+
+  it("migrates a wake word block without cue to the default cue", () => {
+    // Config stockee anterieure au 18/09/2026 : `model` present, pas de `cue`.
+    const legacy = { ...DEFAULT_DEVICE_CONFIG, wakeWord: { model: "alexa" } };
+    const result = validateDeviceConfig(legacy);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.wakeWord).toEqual({
+        model: "alexa",
+        cue: DEFAULT_WAKE_WORD_CUE,
+      });
+    }
+  });
+
+  it("accepts an explicit valid cue", () => {
+    const custom = {
+      flashColor: "#ff8800",
+      blinkDurationMs: 1500,
+      animationUrl: "/animations/Surprised.vrma",
+    };
+    const result = validateDeviceConfig({
+      ...DEFAULT_DEVICE_CONFIG,
+      wakeWord: { model: "hey_jarvis", cue: custom },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.wakeWord.cue).toEqual(custom);
+  });
+
+  it("rejects an invalid wake word cue.flashColor", () => {
+    const bad = {
+      ...DEFAULT_DEVICE_CONFIG,
+      wakeWord: {
+        model: "hey_jarvis",
+        cue: { ...DEFAULT_WAKE_WORD_CUE, flashColor: "#22D3EE" },
+      },
+    };
+    const result = validateDeviceConfig(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("wakeWord.cue.flashColor");
+  });
+
+  it("rejects a wake word cue.blinkDurationMs out of bounds or non-integer", () => {
+    for (const blinkDurationMs of [299, 3001, 900.5, Number.NaN]) {
+      const bad = {
+        ...DEFAULT_DEVICE_CONFIG,
+        wakeWord: {
+          model: "hey_jarvis",
+          cue: { ...DEFAULT_WAKE_WORD_CUE, blinkDurationMs },
+        },
+      };
+      const result = validateDeviceConfig(bad);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors.join(" ")).toContain("wakeWord.cue.blinkDurationMs");
+      }
+    }
+  });
+
+  it("rejects a wake word cue.animationUrl outside the catalog", () => {
+    const bad = {
+      ...DEFAULT_DEVICE_CONFIG,
+      wakeWord: {
+        model: "hey_jarvis",
+        cue: {
+          ...DEFAULT_WAKE_WORD_CUE,
+          animationUrl: "/animations/does-not-exist.vrma",
+        },
+      },
+    };
+    const result = validateDeviceConfig(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("wakeWord.cue.animationUrl");
+  });
+
+  it("exports the wake word cue defaults aligned with the web reference", () => {
+    expect(WAKE_WORD_CUE_FLASH_COLOR).toBe("#22d3ee");
+    expect(WAKE_WORD_CUE_DEFAULT_DURATION_MS).toBe(900);
+    expect(WAKE_WORD_CUE_DEFAULT_ANIMATION_URL).toBe("/animations/Greeting.vrma");
+    expect(DEFAULT_WAKE_WORD_CUE).toEqual({
+      flashColor: "#22d3ee",
+      blinkDurationMs: 900,
+      animationUrl: "/animations/Greeting.vrma",
+    });
   });
 
   it("rejects an unknown wake word model (present block is validated)", () => {

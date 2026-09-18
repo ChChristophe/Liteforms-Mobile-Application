@@ -1,4 +1,11 @@
-import type { AvatarPoseConfig, DeviceConfig } from "../../types/config";
+import {
+  WAKE_WORD_CUE_DEFAULT_ANIMATION_URL,
+  WAKE_WORD_CUE_DEFAULT_DURATION_MS,
+  WAKE_WORD_CUE_FLASH_COLOR,
+  type AvatarPoseConfig,
+  type DeviceConfig,
+  type WakeWordCueConfig,
+} from "../../types/config";
 
 /**
  * Pose de presentation par defaut : modele face camera, cadrage de reference,
@@ -9,6 +16,16 @@ export const DEFAULT_AVATAR_POSE: AvatarPoseConfig = {
   alcoveYaw: 0,
   zoom: 1,
   depth: 0,
+};
+
+/**
+ * Confirmation visuelle du wake word par defaut, identique a la reference Web
+ * (`wakeWordCue.ts`). Doit passer `validateDeviceConfig`.
+ */
+export const DEFAULT_WAKE_WORD_CUE: WakeWordCueConfig = {
+  flashColor: WAKE_WORD_CUE_FLASH_COLOR,
+  blinkDurationMs: WAKE_WORD_CUE_DEFAULT_DURATION_MS,
+  animationUrl: WAKE_WORD_CUE_DEFAULT_ANIMATION_URL,
 };
 
 /**
@@ -47,6 +64,7 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   },
   wakeWord: {
     model: null,
+    cue: DEFAULT_WAKE_WORD_CUE,
   },
   providers: {
     llm: {

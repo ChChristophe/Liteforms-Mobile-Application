@@ -151,7 +151,14 @@ function makeConfig(): DeviceConfig {
       pose: { avatarYaw: 0, alcoveYaw: 0, zoom: 1, depth: 0 },
     },
     environment: { alcoveColor: "#4a90d9" },
-    wakeWord: { model: null },
+    wakeWord: {
+      model: null,
+      cue: {
+        flashColor: "#22d3ee",
+        blinkDurationMs: 900,
+        animationUrl: "/animations/Greeting.vrma",
+      },
+    },
     providers: {
       llm: { provider: "openai", model: "gpt-5.5", endpoint: null, voiceId: null },
       tts: { provider: "elevenlabs", model: "flash", endpoint: null, voiceId: "abc" },

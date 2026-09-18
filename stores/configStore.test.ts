@@ -18,6 +18,11 @@ import {
   saveStoredDeviceConfig,
 } from "../lib/storage/configStorage";
 import { useConfigStore } from "./configStore";
+import {
+  BUNDLED_ANIMATION_FILE_NAME,
+  findAnimationEntry,
+  wakeWordCueAnimationUrlFor,
+} from "../lib/animations/catalog";
 
 const mockLoad = vi.mocked(loadStoredDeviceConfig);
 const mockSave = vi.mocked(saveStoredDeviceConfig);
@@ -86,6 +91,35 @@ describe("configStore mutations", () => {
     useConfigStore.getState().updateWakeWord({ model: "hey_mycroft" });
     expect(useConfigStore.getState().config.wakeWord.model).toBe("hey_mycroft");
     expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("updateWakeWordCue patches one cue field and keeps the others", () => {
+    useConfigStore.getState().updateWakeWordCue({ blinkDurationMs: 1500 });
+    const { cue } = useConfigStore.getState().config.wakeWord;
+    expect(cue.blinkDurationMs).toBe(1500);
+    expect(cue.flashColor).toBe(DEFAULT_DEVICE_CONFIG.wakeWord.cue.flashColor);
+    expect(cue.animationUrl).toBe(DEFAULT_DEVICE_CONFIG.wakeWord.cue.animationUrl);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("selection d'une animation non-idle dans le preview persiste la cue", () => {
+    // Chemin exact de `selectAnimation` (app/(setup)/avatar-preview.tsx).
+    const entry = findAnimationEntry("Greeting.vrma")!;
+    const url = wakeWordCueAnimationUrlFor(entry);
+    if (url !== null) useConfigStore.getState().updateWakeWordCue({ animationUrl: url });
+    expect(useConfigStore.getState().config.wakeWord.cue.animationUrl).toBe(
+      "/animations/Greeting.vrma"
+    );
+  });
+
+  it("selection de l'idle dans le preview ne change pas la cue", () => {
+    useConfigStore.getState().updateWakeWordCue({ animationUrl: "/animations/Spin.vrma" });
+    const idle = findAnimationEntry(BUNDLED_ANIMATION_FILE_NAME)!;
+    const url = wakeWordCueAnimationUrlFor(idle);
+    if (url !== null) useConfigStore.getState().updateWakeWordCue({ animationUrl: url });
+    expect(useConfigStore.getState().config.wakeWord.cue.animationUrl).toBe(
+      "/animations/Spin.vrma"
+    );
   });
 
   it("resetConfig restores defaults and persists", () => {

@@ -267,12 +267,43 @@ export const WAKE_WORD_MODEL_IDS = [
 export type WakeWordModel = (typeof WAKE_WORD_MODEL_IDS)[number];
 
 /**
- * Choix du wake word. `model: null` = aucun wake word (micro manuel), valeur
- * par defaut (« rien de pre-active »).
+ * Confirmation visuelle du wake word (flash de l'alcove + animation de
+ * salutation a la detection). Memes valeurs de reference que le Web
+ * (`lib/avatar/wakeWordCue.ts`), alignees sur le protocole
+ * `DEVICE_API.md` §Bloc `wakeWord` (18/09/2026).
+ */
+export const WAKE_WORD_CUE_FLASH_COLOR = "#22d3ee" as const;
+/** Duree de clignotement par defaut, en millisecondes. */
+export const WAKE_WORD_CUE_DEFAULT_DURATION_MS = 900 as const;
+/** Duree de clignotement minimale, en millisecondes. */
+export const WAKE_WORD_CUE_MIN_DURATION_MS = 300 as const;
+/** Duree de clignotement maximale, en millisecondes. */
+export const WAKE_WORD_CUE_MAX_DURATION_MS = 3000 as const;
+/** Animation jouee a la detection, doit appartenir au catalogue. */
+export const WAKE_WORD_CUE_DEFAULT_ANIMATION_URL =
+  "/animations/Greeting.vrma" as const;
+
+/** Reglages de la confirmation visuelle du wake word. */
+export type WakeWordCueConfig = {
+  /** Couleur du flash de l'alcove, `#rrggbb` minuscule strict. */
+  flashColor: string;
+  /** Duree totale approximative du clignotement, entier `[300, 3000]` ms. */
+  blinkDurationMs: number;
+  /** Animation de salutation, URL appartenant au catalogue d'animations. */
+  animationUrl: string;
+};
+
+/**
+ * Choix du wake word : `model: null` = aucun wake word (micro manuel), valeur
+ * par defaut (« rien de pre-active »). `cue` porte la confirmation visuelle ;
+ * bloc additif, migre vers les defauts lorsqu'il est absent d'une config
+ * stockee anterieure (`configVersion` inchangee).
  */
 export type WakeWordConfig = {
   /** Modele de wake word arme, ou `null` (aucun). */
   model: WakeWordModel | null;
+  /** Confirmation visuelle a la detection. */
+  cue: WakeWordCueConfig;
 };
 
 /** Configuration complete, ordinaire et non secrete, envoyee au Desktop. */

@@ -24,7 +24,12 @@
     "alcoveColor": "#4a90d9"
   },
   "wakeWord": {
-    "model": "hey_jarvis"
+    "model": "hey_jarvis",
+    "cue": {
+      "flashColor": "#22d3ee",
+      "blinkDurationMs": 900,
+      "animationUrl": "/animations/Greeting.vrma"
+    }
   },
   "providers": {
     "llm": {

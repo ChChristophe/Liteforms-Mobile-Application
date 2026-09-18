@@ -11,6 +11,7 @@ import type {
   EnvironmentConfig,
   ProviderSelection,
   WakeWordConfig,
+  WakeWordCueConfig,
 } from "../types/config";
 
 /**
@@ -54,6 +55,11 @@ export type ConfigStore = {
   ) => void;
   /** Remplace la section wakeWord puis persiste. */
   updateWakeWord: (patch: Partial<WakeWordConfig>) => void;
+  /**
+   * Remplace la confirmation visuelle du wake word puis persiste. Action
+   * dediee : `updateWakeWord` remplacerait tout le bloc `cue`, pas un champ.
+   */
+  updateWakeWordCue: (patch: Partial<WakeWordCueConfig>) => void;
   /** Restaure les defauts puis persiste. */
   resetConfig: () => void;
 };
@@ -127,6 +133,18 @@ export const useConfigStore = create<ConfigStore>((set, get) => {
       const next: DeviceConfig = {
         ...get().config,
         wakeWord: { ...get().config.wakeWord, ...patch },
+      };
+      apply(next);
+    },
+
+    updateWakeWordCue: (patch) => {
+      const current = get().config;
+      const next: DeviceConfig = {
+        ...current,
+        wakeWord: {
+          ...current.wakeWord,
+          cue: { ...current.wakeWord.cue, ...patch },
+        },
       };
       apply(next);
     },

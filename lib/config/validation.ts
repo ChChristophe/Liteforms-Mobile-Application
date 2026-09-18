@@ -1,4 +1,5 @@
-import { DEFAULT_AVATAR_POSE } from "./defaults";
+import { DEFAULT_AVATAR_POSE, DEFAULT_WAKE_WORD_CUE } from "./defaults";
+import { findAnimationByUrl } from "../animations/catalog";
 import {
   AVATAR_MOODS,
   CHARACTER_NAME_MAX_LENGTH,
@@ -12,6 +13,8 @@ import {
   isRealtimeVoiceProvider,
   PRONOUNS,
   UNCONFIGURED_PROVIDER,
+  WAKE_WORD_CUE_MAX_DURATION_MS,
+  WAKE_WORD_CUE_MIN_DURATION_MS,
   WAKE_WORD_MODEL_IDS,
   type AvatarConfig,
   type AvatarMood,
@@ -24,6 +27,7 @@ import {
   type SttProviderId,
   type TtsProviderId,
   type WakeWordConfig,
+  type WakeWordCueConfig,
   type WakeWordModel,
 } from "../../types/config";
 
@@ -271,15 +275,19 @@ function validateEnvironment(value: unknown): EnvironmentConfig | string {
 
 /**
  * Valide le bloc `wakeWord` (protocole 18/09/2026) : modele de l'union ou
- * `null`. Bloc additif et optionnel : absent (config stockee anterieure) est
- * migre vers `{ model: null }`, `configVersion` inchangee. Un bloc present
- * avec un `model` hors union fait echouer la validation (champ present =
- * champ soumis au contrat).
+ * `null`, plus la confirmation visuelle `cue`. Bloc additif et optionnel :
+ * absent (config stockee anterieure) est migre vers les defauts,
+ * `configVersion` inchangee. Un bloc present avec un `model` hors union fait
+ * echouer la validation (champ present = champ soumis au contrat).
+ *
+ * `cue` est lui aussi additif et optionnel : absent d'une config stockee
+ * anterieure, il est remplace par les defauts ; present, chacun de ses champs
+ * est exige et valide (champ present = champ soumis au contrat).
  *
  * @returns la config validee, ou une chaine decrivant l'erreur.
  */
 function validateWakeWord(value: unknown): WakeWordConfig | string {
-  if (value === undefined) return { model: null };
+  if (value === undefined) return { model: null, cue: DEFAULT_WAKE_WORD_CUE };
   if (typeof value !== "object" || value === null) return "wakeWord must be an object";
   const v = value as Record<string, unknown>;
   const model = v.model;
@@ -289,7 +297,47 @@ function validateWakeWord(value: unknown): WakeWordConfig | string {
   ) {
     return `wakeWord.model must be null or one of ${WAKE_WORD_MODEL_IDS.join(", ")}`;
   }
-  return { model: model as WakeWordModel | null };
+  const cue = validateWakeWordCue(v.cue);
+  if (typeof cue === "string") return cue;
+  return { model: model as WakeWordModel | null, cue };
+}
+
+/**
+ * Valide la confirmation visuelle du wake word.
+ *
+ * Migration : `cue` absent (config stockee anterieure au 18/09/2026) est
+ * remplace par les defauts. Present mais incomplet ou invalide, il fait
+ * echouer la validation : couleur `#rrggbb` minuscule stricte, duree entiere
+ * dans `[300, 3000]`, animation appartenant au catalogue.
+ *
+ * @returns la cue validee, ou une chaine decrivant l'erreur.
+ */
+function validateWakeWordCue(value: unknown): WakeWordCueConfig | string {
+  if (value === undefined) return DEFAULT_WAKE_WORD_CUE;
+  if (typeof value !== "object" || value === null) return "wakeWord.cue must be an object";
+  const v = value as Record<string, unknown>;
+  if (typeof v.flashColor !== "string" || !HEX_COLOR_PATTERN.test(v.flashColor)) {
+    return "wakeWord.cue.flashColor must be a lowercase #rrggbb hex color";
+  }
+  if (
+    typeof v.blinkDurationMs !== "number" ||
+    !Number.isInteger(v.blinkDurationMs) ||
+    v.blinkDurationMs < WAKE_WORD_CUE_MIN_DURATION_MS ||
+    v.blinkDurationMs > WAKE_WORD_CUE_MAX_DURATION_MS
+  ) {
+    return `wakeWord.cue.blinkDurationMs must be an integer between ${WAKE_WORD_CUE_MIN_DURATION_MS} and ${WAKE_WORD_CUE_MAX_DURATION_MS}`;
+  }
+  if (
+    typeof v.animationUrl !== "string" ||
+    findAnimationByUrl(v.animationUrl) === undefined
+  ) {
+    return "wakeWord.cue.animationUrl must be a known animation url";
+  }
+  return {
+    flashColor: v.flashColor,
+    blinkDurationMs: v.blinkDurationMs,
+    animationUrl: v.animationUrl,
+  };
 }
 
 /**

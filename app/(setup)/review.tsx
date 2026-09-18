@@ -9,6 +9,7 @@ import {
 } from '../../types/config';
 import { hasUnconfiguredProvider, validateDeviceConfig } from '../../lib/config/validation';
 import { applyRealtimeVoiceDefaults } from '../../lib/config/serialization';
+import { findAnimationByUrl } from '../../lib/animations/catalog';
 import { providerSlotDisplay } from '../../lib/providers/catalog';
 import { wakeWordLabel } from '../../lib/wakeword/catalog';
 import { getProviderStatus, postCredential } from '../../lib/network/deviceClient';
@@ -57,6 +58,11 @@ function pronounLabel(pronouns: DeviceConfig['character']['pronouns']): string {
 /** Libelle de l'humeur, ou "Defaut" si `null`. */
 function moodLabel(mood: DeviceConfig['avatar']['mood']): string {
   return mood ?? 'Défaut';
+}
+
+/** Duree du clignotement du wake word, formatee en secondes. */
+function cueDurationLabel(ms: number): string {
+  return `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
 }
 
 /**
@@ -265,6 +271,27 @@ export default function ReviewScreen() {
 
         <SectionLink href="/wake-word" title="Wake word">
           <Text style={styles.detail}>{wakeWordLabel(config.wakeWord.model)}</Text>
+          {config.wakeWord.model !== null && (
+            <>
+              <View style={styles.colorRow}>
+                <Text style={styles.detail}>
+                  Flash {config.wakeWord.cue.flashColor} ·{' '}
+                  {cueDurationLabel(config.wakeWord.cue.blinkDurationMs)}
+                </Text>
+                <View
+                  style={[
+                    styles.colorDot,
+                    { backgroundColor: config.wakeWord.cue.flashColor },
+                  ]}
+                />
+              </View>
+              <Text style={styles.detail}>
+                Animation :{' '}
+                {findAnimationByUrl(config.wakeWord.cue.animationUrl)?.label ??
+                  config.wakeWord.cue.animationUrl}
+              </Text>
+            </>
+          )}
         </SectionLink>
 
         <Pressable
