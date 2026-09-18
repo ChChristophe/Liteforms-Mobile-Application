@@ -1066,6 +1066,17 @@ ces slots (`hasUnconfiguredProvider`), le remplissage wire kokoro/distil-whisper
 (`applyRealtimeVoiceDefaults`/`serializeDeviceConfig`) et l'affichage review
 « Inclus dans <label> » (`providerSlotDisplay`). Tests vitest associes verts.
 
+#### Statut Phase 3 — 18/09/2026 (wake word)
+
+Regle workspace respectee : **toute la configuration vient du smartphone**. Le
+choix du wake word est desormais cote Mobile — ecran `wake-word` (chips
+« Aucun » + hey_jarvis/alexa/hey_mycroft/hey_rhasspy), catalogue statique
+`lib/wakeword/catalog.ts`, champ `wakeWord.model` dans `DeviceConfig`
+(optionnel, absent → `{model:null}`), section au recapitulatif. Il part sur le
+fil via `POST /api/device-config` (bloc `wakeWord`, protocole 18/09/2026) ;
+l'appliance applique le choix et re-arme son bridge. L'UI desktop garde sa
+propre selection, ecrasee a la reception d'une config Mobile. Tests verts.
+
 #### Gate de sortie
 
 - chaque ecran conserve le comportement fonctionnel attendu du Web ;

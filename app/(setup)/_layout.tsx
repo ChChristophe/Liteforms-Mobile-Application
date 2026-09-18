@@ -26,6 +26,10 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Providers' }}
       />
       <Stack.Screen
+        name="wake-word"
+        options={{ headerShown: true, title: 'Wake word' }}
+      />
+      <Stack.Screen
         name="vrm-select"
         options={{ headerShown: true, title: 'Modèle VRM' }}
       />

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_DEVICE_CONFIG } from "./defaults";
 import { hasUnconfiguredProvider, validateDeviceConfig } from "./validation";
-import { DEVICE_CONFIG_VERSION, type DeviceConfig } from "../../types/config";
+import { DEVICE_CONFIG_VERSION, WAKE_WORD_MODEL_IDS, type DeviceConfig } from "../../types/config";
 
 /** Config dont seul le slot LLM est renseigne (tts/stt restent "none"). */
 function realtimeWithEmptySpeech(provider: "openai-realtime" | "google-live"): DeviceConfig {
@@ -74,6 +74,36 @@ describe("validateDeviceConfig", () => {
       environment: { alcoveColor: "#4A90D9" },
     };
     expect(validateDeviceConfig(bad).ok).toBe(false);
+  });
+
+  it("starts without a wake word (rien de pré-activé)", () => {
+    expect(DEFAULT_DEVICE_CONFIG.wakeWord).toEqual({ model: null });
+  });
+
+  it("accepts each wake word model of the union", () => {
+    for (const model of WAKE_WORD_MODEL_IDS) {
+      const result = validateDeviceConfig({ ...DEFAULT_DEVICE_CONFIG, wakeWord: { model } });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.config.wakeWord).toEqual({ model });
+    }
+  });
+
+  it("accepts a null wake word and migrates an absent block to the default", () => {
+    const nulled = { ...DEFAULT_DEVICE_CONFIG, wakeWord: { model: null } };
+    expect(validateDeviceConfig(nulled).ok).toBe(true);
+    // Config stockee anterieure au 18/09/2026 : le bloc est absent.
+    const legacy: Record<string, unknown> = { ...DEFAULT_DEVICE_CONFIG };
+    delete legacy.wakeWord;
+    const result = validateDeviceConfig(legacy);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.wakeWord).toEqual({ model: null });
+  });
+
+  it("rejects an unknown wake word model (present block is validated)", () => {
+    const bad = { ...DEFAULT_DEVICE_CONFIG, wakeWord: { model: "hey_siri" } };
+    const result = validateDeviceConfig(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("wakeWord.model");
   });
 
   it("rejects provider ids outside the slot union and empty models", () => {

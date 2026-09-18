@@ -12,6 +12,7 @@ import {
   isRealtimeVoiceProvider,
   PRONOUNS,
   UNCONFIGURED_PROVIDER,
+  WAKE_WORD_MODEL_IDS,
   type AvatarConfig,
   type AvatarMood,
   type AvatarPoseConfig,
@@ -22,6 +23,8 @@ import {
   type Pronouns,
   type SttProviderId,
   type TtsProviderId,
+  type WakeWordConfig,
+  type WakeWordModel,
 } from "../../types/config";
 
 /**
@@ -124,6 +127,9 @@ export function validateDeviceConfig(value: unknown): DeviceConfigValidation {
   const environment = validateEnvironment(v.environment);
   if (typeof environment === "string") errors.push(environment);
 
+  const wakeWord = validateWakeWord(v.wakeWord);
+  if (typeof wakeWord === "string") errors.push(wakeWord);
+
   const providers = validateProviders(v.providers);
   if (typeof providers === "string") errors.push(providers);
 
@@ -135,6 +141,7 @@ export function validateDeviceConfig(value: unknown): DeviceConfigValidation {
       character: character as CharacterConfig,
       avatar: avatar as AvatarConfig,
       environment: environment as EnvironmentConfig,
+      wakeWord: wakeWord as WakeWordConfig,
       providers: providers as DeviceConfig["providers"],
     },
   };
@@ -260,6 +267,29 @@ function validateEnvironment(value: unknown): EnvironmentConfig | string {
     return "environment.alcoveColor must be a lowercase #rrggbb hex color or null";
   }
   return { alcoveColor: color as string | null };
+}
+
+/**
+ * Valide le bloc `wakeWord` (protocole 18/09/2026) : modele de l'union ou
+ * `null`. Bloc additif et optionnel : absent (config stockee anterieure) est
+ * migre vers `{ model: null }`, `configVersion` inchangee. Un bloc present
+ * avec un `model` hors union fait echouer la validation (champ present =
+ * champ soumis au contrat).
+ *
+ * @returns la config validee, ou une chaine decrivant l'erreur.
+ */
+function validateWakeWord(value: unknown): WakeWordConfig | string {
+  if (value === undefined) return { model: null };
+  if (typeof value !== "object" || value === null) return "wakeWord must be an object";
+  const v = value as Record<string, unknown>;
+  const model = v.model;
+  if (
+    model !== null &&
+    !(WAKE_WORD_MODEL_IDS as readonly string[]).includes(model as string)
+  ) {
+    return `wakeWord.model must be null or one of ${WAKE_WORD_MODEL_IDS.join(", ")}`;
+  }
+  return { model: model as WakeWordModel | null };
 }
 
 /**

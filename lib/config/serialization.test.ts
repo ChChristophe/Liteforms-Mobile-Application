@@ -39,6 +39,17 @@ describe("serializeDeviceConfig / parseDeviceConfig", () => {
     expect(parsed).toEqual(CONFIGURED);
   });
 
+  it("transporte le bloc wakeWord sur le fil (choix seul, jamais d'audio)", () => {
+    const withWake: DeviceConfig = { ...CONFIGURED, wakeWord: { model: "hey_jarvis" } };
+    const parsed = JSON.parse(serializeDeviceConfig(withWake)) as DeviceConfig;
+    expect(parsed.wakeWord).toEqual({ model: "hey_jarvis" });
+  });
+
+  it("envoie wakeWord.model:null quand aucun wake word n'est choisi", () => {
+    const parsed = JSON.parse(serializeDeviceConfig(CONFIGURED)) as DeviceConfig;
+    expect(parsed.wakeWord).toEqual({ model: null });
+  });
+
   it("returns null for corrupted JSON without throwing", () => {
     expect(parseDeviceConfig("{not json")).toBeNull();
     expect(parseDeviceConfig("")).toBeNull();

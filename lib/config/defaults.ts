@@ -45,6 +45,9 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   environment: {
     alcoveColor: "#4a90d9",
   },
+  wakeWord: {
+    model: null,
+  },
   providers: {
     llm: {
       provider: "none",

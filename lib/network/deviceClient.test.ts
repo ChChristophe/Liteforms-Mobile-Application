@@ -151,6 +151,7 @@ function makeConfig(): DeviceConfig {
       pose: { avatarYaw: 0, alcoveYaw: 0, zoom: 1, depth: 0 },
     },
     environment: { alcoveColor: "#4a90d9" },
+    wakeWord: { model: null },
     providers: {
       llm: { provider: "openai", model: "gpt-5.5", endpoint: null, voiceId: null },
       tts: { provider: "elevenlabs", model: "flash", endpoint: null, voiceId: "abc" },

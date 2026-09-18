@@ -23,6 +23,9 @@
   "environment": {
     "alcoveColor": "#4a90d9"
   },
+  "wakeWord": {
+    "model": "hey_jarvis"
+  },
   "providers": {
     "llm": {
       "provider": "openai",

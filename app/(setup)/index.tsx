@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConfigStore } from '../../stores/configStore';
 import { useOnboardingStore } from '../../stores/onboardingStore';
+import { wakeWordLabel } from '../../lib/wakeword/catalog';
 
 /** Entree du menu de configuration. */
 type MenuEntry = {
@@ -16,6 +17,7 @@ type MenuEntry = {
     | '/character'
     | '/environment'
     | '/providers'
+    | '/wake-word'
     | '/vrm-select'
      | '/review'
       | '/avatar-preview'
@@ -49,6 +51,7 @@ export default function SetupIndexScreen() {
   const characterName = useConfigStore((state) => state.config.character.name);
   const alcoveColor = useConfigStore((state) => state.config.environment.alcoveColor);
   const modelFileName = useConfigStore((state) => state.config.avatar.modelRef.fileName);
+  const wakeWord = useConfigStore((state) => state.config.wakeWord.model);
 
   const entries: MenuEntry[] = [
     {
@@ -67,6 +70,11 @@ export default function SetupIndexScreen() {
       title: 'Providers',
       subtitle: 'LLM, TTS et STT — catalogues statiques, sans appel réseau',
       href: '/providers',
+    },
+    {
+      title: 'Wake word',
+      subtitle: `Mot d'éveil — actuellement : ${wakeWordLabel(wakeWord)}`,
+      href: '/wake-word',
     },
     {
       title: 'Modèle VRM',

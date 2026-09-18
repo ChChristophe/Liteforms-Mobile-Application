@@ -82,6 +82,12 @@ describe("configStore mutations", () => {
     expect(providers.stt).toEqual(DEFAULT_DEVICE_CONFIG.providers.stt);
   });
 
+  it("updateWakeWord patches the section and persists", () => {
+    useConfigStore.getState().updateWakeWord({ model: "hey_mycroft" });
+    expect(useConfigStore.getState().config.wakeWord.model).toBe("hey_mycroft");
+    expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
   it("resetConfig restores defaults and persists", () => {
     useConfigStore.getState().updateCharacter({ name: "Rex" });
     useConfigStore.getState().resetConfig();

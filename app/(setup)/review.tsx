@@ -10,6 +10,7 @@ import {
 import { hasUnconfiguredProvider, validateDeviceConfig } from '../../lib/config/validation';
 import { applyRealtimeVoiceDefaults } from '../../lib/config/serialization';
 import { providerSlotDisplay } from '../../lib/providers/catalog';
+import { wakeWordLabel } from '../../lib/wakeword/catalog';
 import { getProviderStatus, postCredential } from '../../lib/network/deviceClient';
 import { useConfigStore } from '../../stores/configStore';
 import { useConnectionStore } from '../../stores/connectionStore';
@@ -21,11 +22,12 @@ import type { ProviderStatusResponse } from '../../types/device';
  *
  * Comportement :
  * - affiche chaque section du contrat (identite, ambiance, modele VRM,
- *   providers) telle qu'elle sera envoyee au Desktop ;
+ *   providers, wake word) telle qu'elle sera envoyee au Desktop ;
  * - chaque section est TAPABLE et ramene sur son ecran de configuration :
  *   Identite -> /character, Ambiance -> /environment, Modele VRM ->
  *   /vrm-select, LLM/TTS/STT -> /providers (les trois slots partagent
- *   l'ecran ; le ciblage par section n'existe pas encore) ;
+ *   l'ecran ; le ciblage par section n'existe pas encore), Wake word ->
+ *   /wake-word ;
  * - re-valide la configuration complete avec `validateDeviceConfig` et
  *   affiche le statut global plus les erreurs champ par champ ; c'est la
  *   meme barriere qui bloquera l'envoi en Phase 6 ;
@@ -67,7 +69,7 @@ function SectionLink({
   children,
 }: {
   /** Route de configuration cible. */
-  href: '/character' | '/environment' | '/vrm-select' | '/providers';
+  href: '/character' | '/environment' | '/vrm-select' | '/providers' | '/wake-word';
   /** Titre de la section. */
   title: string;
   /** Lignes de detail libres. */
@@ -259,6 +261,10 @@ export default function ReviewScreen() {
               {providerSlotDisplay(slot, config.providers[slot], config.providers.llm.provider)}
             </Text>
           ))}
+        </SectionLink>
+
+        <SectionLink href="/wake-word" title="Wake word">
+          <Text style={styles.detail}>{wakeWordLabel(config.wakeWord.model)}</Text>
         </SectionLink>
 
         <Pressable

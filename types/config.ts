@@ -248,6 +248,33 @@ export type EnvironmentConfig = {
   alcoveColor: string | null;
 };
 
+/**
+ * Liste exhaustive des modeles de wake word embarques par l'appliance, pour
+ * validation et UI (protocole `DEVICE_API.md` §`POST /api/device-config`,
+ * bloc `wakeWord`, 18/09/2026).
+ */
+export const WAKE_WORD_MODEL_IDS = [
+  "hey_jarvis",
+  "alexa",
+  "hey_mycroft",
+  "hey_rhasspy",
+] as const;
+
+/**
+ * Modele de wake word supporte par l'appliance (detection 100 % locale : le
+ * Mobile ne transporte que ce choix, jamais d'audio ni de fichier modele).
+ */
+export type WakeWordModel = (typeof WAKE_WORD_MODEL_IDS)[number];
+
+/**
+ * Choix du wake word. `model: null` = aucun wake word (micro manuel), valeur
+ * par defaut (« rien de pre-active »).
+ */
+export type WakeWordConfig = {
+  /** Modele de wake word arme, ou `null` (aucun). */
+  model: WakeWordModel | null;
+};
+
 /** Configuration complete, ordinaire et non secrete, envoyee au Desktop. */
 export type DeviceConfig = {
   /** Version du format de configuration, toujours `DEVICE_CONFIG_VERSION`. */
@@ -258,6 +285,11 @@ export type DeviceConfig = {
   avatar: AvatarConfig;
   /** Environnement (alcove). */
   environment: EnvironmentConfig;
+  /**
+   * Wake word. Bloc additif et optionnel dans le contrat : une config stockee
+   * anterieure est migree vers `{ model: null }` par la validation.
+   */
+  wakeWord: WakeWordConfig;
   /** Selections providers par slot. */
   providers: {
     /** Slot LLM. */

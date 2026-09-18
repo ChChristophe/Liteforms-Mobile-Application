@@ -10,6 +10,7 @@ import type {
   DeviceConfig,
   EnvironmentConfig,
   ProviderSelection,
+  WakeWordConfig,
 } from "../types/config";
 
 /**
@@ -51,6 +52,8 @@ export type ConfigStore = {
     slot: "llm" | "tts" | "stt",
     patch: Partial<ProviderSelection>
   ) => void;
+  /** Remplace la section wakeWord puis persiste. */
+  updateWakeWord: (patch: Partial<WakeWordConfig>) => void;
   /** Restaure les defauts puis persiste. */
   resetConfig: () => void;
 };
@@ -116,6 +119,14 @@ export const useConfigStore = create<ConfigStore>((set, get) => {
           ...current.providers,
           [slot]: { ...current.providers[slot], ...patch },
         },
+      };
+      apply(next);
+    },
+
+    updateWakeWord: (patch) => {
+      const next: DeviceConfig = {
+        ...get().config,
+        wakeWord: { ...get().config.wakeWord, ...patch },
       };
       apply(next);
     },
