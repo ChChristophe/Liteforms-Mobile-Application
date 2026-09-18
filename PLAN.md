@@ -1046,7 +1046,25 @@ Le Mobile peut afficher les providers/configurations compatibles, mais :
 - les catalogues doivent etre statiques ou fournis par Electron ;
 - les providers desktop-only doivent etre marques ou exclus ;
 - les credentials suivent D1 ;
-- les erreurs de configuration sont locales et explicites.
+- les erreurs de configuration sont locales et explicites ;
+- provider LLM **realtime** (`openai-realtime`/`google-live`) : la voix couvre
+  l'entree et la sortie. L'ecran providers masque alors les slots TTS/STT
+  (note « TTS et STT inclus dans <label> », et pas de champ cle TTS/STT) et le
+  review les affiche « Inclus dans <label> ». Au moment de l'envoi, un slot
+  TTS/STT reste `"none"` est rempli par les defauts de reference Web
+  `kokoro`/`distil-whisper` (sans cle) car le contrat wire exige toujours les
+  trois slots ; un slot deja configure est conserve. La voix realtime voyage
+  dans `providers.llm.voiceId` (protocole 18/09/2026, `DEVICE_API.md`
+  §`POST /api/device-config` encadre « Providers realtime »).
+
+#### Statut Phase 3 — 18/09/2026 (logique realtime)
+
+Porter le comportement Web de l'etape LLM (`OnboardingModal`) : le bouton saute
+les etapes TTS/STT quand le provider est realtime. Cote Mobile, cela se traduit
+par le masquage des formulaires TTS/STT, la levee du gate d'envoi `"none"` sur
+ces slots (`hasUnconfiguredProvider`), le remplissage wire kokoro/distil-whisper
+(`applyRealtimeVoiceDefaults`/`serializeDeviceConfig`) et l'affichage review
+« Inclus dans <label> » (`providerSlotDisplay`). Tests vitest associes verts.
 
 #### Gate de sortie
 

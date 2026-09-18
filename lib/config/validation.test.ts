@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_DEVICE_CONFIG } from "./defaults";
-import { validateDeviceConfig } from "./validation";
-import { DEVICE_CONFIG_VERSION } from "../../types/config";
+import { hasUnconfiguredProvider, validateDeviceConfig } from "./validation";
+import { DEVICE_CONFIG_VERSION, type DeviceConfig } from "../../types/config";
+
+/** Config dont seul le slot LLM est renseigne (tts/stt restent "none"). */
+function realtimeWithEmptySpeech(provider: "openai-realtime" | "google-live"): DeviceConfig {
+  return {
+    ...DEFAULT_DEVICE_CONFIG,
+    providers: {
+      ...DEFAULT_DEVICE_CONFIG.providers,
+      llm: { provider, model: "m", endpoint: "wss://e", voiceId: "coral" },
+    },
+  };
+}
 
 describe("validateDeviceConfig", () => {
   it("accepts the default configuration", () => {
@@ -171,5 +182,29 @@ describe("validateDeviceConfig", () => {
 
   it("keeps the contract version constant stable", () => {
     expect(DEVICE_CONFIG_VERSION).toBe("1.0");
+  });
+});
+
+describe("hasUnconfiguredProvider (gate d'envoi)", () => {
+  it("bloque tant qu'un des trois slots est \"none\" en mode classique", () => {
+    const oneNone: DeviceConfig = {
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        llm: { provider: "openai", model: "gpt-5.5", endpoint: null, voiceId: null },
+        tts: { provider: "elevenlabs", model: "m", endpoint: null, voiceId: null },
+        // stt reste "none"
+      },
+    };
+    expect(hasUnconfiguredProvider(oneNone)).toBe(true);
+  });
+
+  it("ne bloque plus sur tts/stt quand le LLM est realtime (voix entree+sortie)", () => {
+    expect(hasUnconfiguredProvider(realtimeWithEmptySpeech("openai-realtime"))).toBe(false);
+    expect(hasUnconfiguredProvider(realtimeWithEmptySpeech("google-live"))).toBe(false);
+  });
+
+  it("bloque toujours quand le slot LLM lui-meme est \"none\"", () => {
+    expect(hasUnconfiguredProvider(DEFAULT_DEVICE_CONFIG)).toBe(true);
   });
 });

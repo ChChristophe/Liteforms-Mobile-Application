@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_DEVICE_CONFIG } from "./defaults";
-import { parseDeviceConfig, serializeDeviceConfig } from "./serialization";
+import {
+  applyRealtimeVoiceDefaults,
+  parseDeviceConfig,
+  REALTIME_STT_FALLBACK,
+  REALTIME_TTS_FALLBACK,
+  serializeDeviceConfig,
+} from "./serialization";
 import type { DeviceConfig } from "../../types/config";
+
+/** LLM realtime, TTS/STT restes non configures (etat d'edition mobile). */
+const REALTIME_EDIT: DeviceConfig = {
+  ...DEFAULT_DEVICE_CONFIG,
+  providers: {
+    llm: { provider: "openai-realtime", model: "gpt-realtime-2", endpoint: null, voiceId: "coral" },
+    tts: { provider: "none", model: "", endpoint: null, voiceId: null },
+    stt: { provider: "none", model: "", endpoint: null, voiceId: null },
+  },
+};
 
 /**
  * Config completement configuree (aucun slot "none") : seule forme envoyable
@@ -57,5 +73,52 @@ describe("serializeDeviceConfig / parseDeviceConfig", () => {
     // l'accepter (etat d'edition valide), seule la serialisation wire refuse.
     const parsed = parseDeviceConfig(JSON.stringify(DEFAULT_DEVICE_CONFIG));
     expect(parsed).toEqual(DEFAULT_DEVICE_CONFIG);
+  });
+});
+
+describe("applyRealtimeVoiceDefaults (remplissage du fil)", () => {
+  it("remplit tts/stt \"none\" par kokoro/distil-whisper quand le LLM est realtime", () => {
+    const wire = applyRealtimeVoiceDefaults(REALTIME_EDIT);
+    expect(wire.providers.tts).toEqual(REALTIME_TTS_FALLBACK);
+    expect(wire.providers.stt).toEqual(REALTIME_STT_FALLBACK);
+    // La voix realtime du LLM est preservee (contrat 18/09/2026).
+    expect(wire.providers.llm).toEqual(REALTIME_EDIT.providers.llm);
+  });
+
+  it("conserve un slot TTS/STT deja configure (valeur valide)", () => {
+    const kept: DeviceConfig = {
+      ...REALTIME_EDIT,
+      providers: {
+        ...REALTIME_EDIT.providers,
+        tts: { provider: "elevenlabs", model: "eleven_flash_v2_5", endpoint: null, voiceId: "v" },
+      },
+    };
+    const wire = applyRealtimeVoiceDefaults(kept);
+    expect(wire.providers.tts).toEqual(kept.providers.tts);
+    expect(wire.providers.stt).toEqual(REALTIME_STT_FALLBACK);
+  });
+
+  it("ne touche pas une config non realtime", () => {
+    expect(applyRealtimeVoiceDefaults(CONFIGURED)).toEqual(CONFIGURED);
+  });
+
+  it("serialise une config realtime a slots tts/stt \"none\" (contrat 3 slots)", () => {
+    const raw = serializeDeviceConfig(REALTIME_EDIT);
+    expect(raw).not.toContain('"none"');
+    const parsed = JSON.parse(raw) as DeviceConfig;
+    expect(parsed.providers.tts.provider).toBe("kokoro");
+    expect(parsed.providers.stt.provider).toBe("distil-whisper");
+    expect(parsed.providers.llm.voiceId).toBe("coral");
+    // `isProviders` Electron exige un endpoint string : jamais null sur le fil.
+    expect(typeof parsed.providers.tts.endpoint).toBe("string");
+    expect(typeof parsed.providers.stt.endpoint).toBe("string");
+  });
+
+  it("refuse toujours un LLM realtime sans provider LLM choisi", () => {
+    const noLlm: DeviceConfig = {
+      ...REALTIME_EDIT,
+      providers: { ...REALTIME_EDIT.providers, llm: { provider: "none", model: "", endpoint: null, voiceId: null } },
+    };
+    expect(() => serializeDeviceConfig(noLlm)).toThrow(/unconfigured/);
   });
 });

@@ -2,8 +2,14 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { type DeviceConfig, UNCONFIGURED_PROVIDER } from '../../types/config';
+import {
+  isRealtimeVoiceProvider,
+  type DeviceConfig,
+  UNCONFIGURED_PROVIDER,
+} from '../../types/config';
 import { hasUnconfiguredProvider, validateDeviceConfig } from '../../lib/config/validation';
+import { applyRealtimeVoiceDefaults } from '../../lib/config/serialization';
+import { providerSlotDisplay } from '../../lib/providers/catalog';
 import { getProviderStatus, postCredential } from '../../lib/network/deviceClient';
 import { useConfigStore } from '../../stores/configStore';
 import { useConnectionStore } from '../../stores/connectionStore';
@@ -23,6 +29,10 @@ import type { ProviderStatusResponse } from '../../types/device';
  * - re-valide la configuration complete avec `validateDeviceConfig` et
  *   affiche le statut global plus les erreurs champ par champ ; c'est la
  *   meme barriere qui bloquera l'envoi en Phase 6 ;
+ * - provider LLM realtime (`openai-realtime`/`google-live`) : TTS et STT
+ *   s'affichent « Inclus dans <label LLM> » (comportement Web
+ *   `ChatPanel`) et partent remplis des defauts de reference (contrat wire
+ *   a trois slots), sans cle TTS/STT ;
  * - bouton d'envoi branche sur `connectionStore.sendConfig` (Phase B, route
  *   contractuelle `POST /api/device-config`) : accuse de reception affiche
  *   avec `appliedAt` et warnings (ex. mood/pose non appliques) ; erreur
@@ -93,9 +103,13 @@ async function pushCredentials(
   port: number,
   config: DeviceConfig
 ): Promise<string[]> {
-  const selected = (['llm', 'tts', 'stt'] as const).map(
-    (slot) => config.providers[slot].provider
-  );
+  // Realtime : seuls TTS/STT sont ignorees par l'appliance, seule la cle du
+  // provider LLM a un sens (les autres slots peuvent rester d'anciennes
+  // selections non modifiables depuis l'ecran providers).
+  const slots = isRealtimeVoiceProvider(config.providers.llm.provider)
+    ? (['llm'] as const)
+    : (['llm', 'tts', 'stt'] as const);
+  const selected = slots.map((slot) => config.providers[slot].provider);
   const distinct = Array.from(
     new Set(selected.filter((id) => id !== UNCONFIGURED_PROVIDER))
   );
@@ -129,6 +143,8 @@ export default function ReviewScreen() {
   const sendConfig = useConnectionStore((state) => state.sendConfig);
   const connectedDesktop = useConnectionStore((state) => state.connectedDesktop);
   const validation = validateDeviceConfig(config);
+  // Un LLM realtime couvre TTS/STT : ces slots ne bloquent plus l'envoi.
+  const realtime = isRealtimeVoiceProvider(config.providers.llm.provider);
   // Un slot encore "none" est VALIDE mais non envoyable : on bloque l'envoi.
   const unconfigured = hasUnconfiguredProvider(config);
   const sendable = validation.ok && !unconfigured;
@@ -147,7 +163,10 @@ export default function ReviewScreen() {
     setSendAck(null);
     setProviderStatus(null);
     try {
-      const result = await sendConfig(validation.config);
+      // Le contrat wire exige les trois slots : un LLM realtime remplit les
+      // slots TTS/STT restes "none" avec les defauts de reference.
+      const wireConfig = applyRealtimeVoiceDefaults(validation.config);
+      const result = await sendConfig(wireConfig);
       if (!result.ok) {
         setSendError(result.error);
         return;
@@ -157,7 +176,7 @@ export default function ReviewScreen() {
       // Clés API (D1) : envoi séparé APRES device-config, jamais persisté.
       const { host, port } = useConnectionStore.getState();
       if (host !== null && port !== null) {
-        const credentialErrors = await pushCredentials(host, port, validation.config);
+        const credentialErrors = await pushCredentials(host, port, wireConfig);
         if (credentialErrors.length > 0) {
           setSendError(`Clés API non envoyées : ${credentialErrors.join(' ; ')}`);
         }
@@ -193,7 +212,9 @@ export default function ReviewScreen() {
           ))}
           {validation.ok && unconfigured && (
             <Text style={styles.errorLine}>
-              • Choisis un provider pour LLM, TTS et STT avant l'envoi.
+              • {realtime
+                ? 'Choisis un provider LLM avant l’envoi.'
+                : 'Choisis un provider pour LLM, TTS et STT avant l’envoi.'}
             </Text>
           )}
         </View>
@@ -232,19 +253,12 @@ export default function ReviewScreen() {
         </SectionLink>
 
         <SectionLink href="/providers" title="Providers">
-          {(['llm', 'tts', 'stt'] as const).map((slot) => {
-            const selection = config.providers[slot];
-            return (
-              <Text key={slot} style={styles.detail}>
-                <Text style={styles.slotPrefix}>{slot.toUpperCase()} — </Text>
-                {selection.provider === UNCONFIGURED_PROVIDER
-                  ? 'Non configuré'
-                  : `${selection.provider} · ${selection.model || '⚠ modèle requis'}${
-                      selection.voiceId ? ` — voix ${selection.voiceId}` : ''
-                    }`}
-              </Text>
-            );
-          })}
+          {(['llm', 'tts', 'stt'] as const).map((slot) => (
+            <Text key={slot} style={styles.detail}>
+              <Text style={styles.slotPrefix}>{slot.toUpperCase()} — </Text>
+              {providerSlotDisplay(slot, config.providers[slot], config.providers.llm.provider)}
+            </Text>
+          ))}
         </SectionLink>
 
         <Pressable

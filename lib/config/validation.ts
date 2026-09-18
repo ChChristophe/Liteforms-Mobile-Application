@@ -9,6 +9,7 @@ import {
   POSE_DEPTH_MIN,
   POSE_ZOOM_MAX,
   POSE_ZOOM_MIN,
+  isRealtimeVoiceProvider,
   PRONOUNS,
   UNCONFIGURED_PROVIDER,
   type AvatarConfig,
@@ -327,10 +328,18 @@ function validateSelection<P extends string>(
  * review s'en sert pour bloquer l'envoi et `serializeDeviceConfig` pour la
  * refuser (défense en profondeur).
  *
+ * Exception realtime (protocole 18/09/2026) : quand `llm.provider` est
+ * realtime (`openai-realtime`/`google-live`), la voix couvre TTS et STT ;
+ * ces deux slots sont ignores par l'appliance et ne bloquent donc plus
+ * l'envoi. Seul le slot LLM reste exige.
+ *
  * @param config configuration (validee ou non).
  */
 export function hasUnconfiguredProvider(config: DeviceConfig): boolean {
-  return (["llm", "tts", "stt"] as const).some(
+  const slots = isRealtimeVoiceProvider(config.providers.llm.provider)
+    ? (["llm"] as const)
+    : (["llm", "tts", "stt"] as const);
+  return slots.some(
     (slot) => config.providers[slot].provider === UNCONFIGURED_PROVIDER
   );
 }

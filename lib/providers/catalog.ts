@@ -14,7 +14,14 @@
  *   sur Mobile et transferee une seule fois a Electron en Phase 8 ; le
  *   statut configure/non-configure viendra des reponses Desktop).
  */
-import type { LlmProviderId, SttProviderId, TtsProviderId } from "../../types/config";
+import {
+  isRealtimeVoiceProvider,
+  UNCONFIGURED_PROVIDER,
+  type LlmProviderId,
+  type ProviderSelection,
+  type SttProviderId,
+  type TtsProviderId,
+} from "../../types/config";
 
 /** Entree de catalogue pour un slot provider. */
 export type ProviderCatalogEntry<P extends string = string> = {
@@ -388,4 +395,34 @@ export function findProviderEntry(providerId: string): ProviderCatalogEntry | un
  */
 export function providerRequiresKey(providerId: string): boolean {
   return findProviderEntry(providerId)?.requiresKey ?? false;
+}
+
+/** Libelle affichable d'un provider, ou l'id brut s'il est hors catalogue. */
+export function providerLabel(providerId: string): string {
+  return findProviderEntry(providerId)?.label ?? providerId;
+}
+
+/**
+ * Resume d'un slot provider pour l'ecran review (comportement Web
+ * `ChatPanel` : « Included in <provider> » quand le LLM est realtime).
+ *
+ * - TTS/STT avec un LLM realtime : la voix du LLM couvre l'entree et la
+ *   sortie, le slot est « Inclus dans <label LLM> » ;
+ * - sinon : `provider · modele [— voix X]`, ou « Non configuré » (sentinel).
+ *
+ * @param slot slot resume.
+ * @param selection selection courante du slot.
+ * @param llmProviderId provider LLM courant (pilote le mode realtime).
+ */
+export function providerSlotDisplay(
+  slot: "llm" | "tts" | "stt",
+  selection: ProviderSelection,
+  llmProviderId: string
+): string {
+  if (slot !== "llm" && isRealtimeVoiceProvider(llmProviderId)) {
+    return `Inclus dans ${providerLabel(llmProviderId)}`;
+  }
+  if (selection.provider === UNCONFIGURED_PROVIDER) return "Non configuré";
+  const voice = selection.voiceId ? ` — voix ${selection.voiceId}` : "";
+  return `${selection.provider} · ${selection.model || "⚠ modèle requis"}${voice}`;
 }

@@ -75,6 +75,25 @@ export type LlmProviderId =
   | "lmstudio"
   | "openclaw";
 
+/**
+ * Providers LLM « realtime » : la voix couvre l'entree ET la sortie, TTS et
+ * STT sont donc inutiles (protocole `DEVICE_API.md` §`POST /api/device-config`,
+ * encadre « Providers realtime (18/09/2026) »). Aligne sur la reference Web
+ * (`OnboardingModal.isRealtimeVoiceProvider`).
+ */
+export const REALTIME_VOICE_PROVIDERS: readonly LlmProviderId[] = [
+  "openai-realtime",
+  "google-live",
+];
+
+/**
+ * Indique si un provider LLM est realtime (voix entree + sortie, TTS/STT
+ * couverts). Accepte volontairement une chaine pour les validations.
+ */
+export function isRealtimeVoiceProvider(provider: string): boolean {
+  return (REALTIME_VOICE_PROVIDERS as readonly string[]).includes(provider);
+}
+
 /** Providers TTS configurables, alignes sur le catalogue Web (`TTS_PROVIDER_OPTIONS`). */
 export type TtsProviderId =
   | typeof UNCONFIGURED_PROVIDER

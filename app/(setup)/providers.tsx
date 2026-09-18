@@ -14,11 +14,12 @@ import type {
   SttProviderId,
   TtsProviderId,
 } from '../../types/config';
-import { UNCONFIGURED_PROVIDER } from '../../types/config';
+import { isRealtimeVoiceProvider, UNCONFIGURED_PROVIDER } from '../../types/config';
 import {
   findCatalogEntry,
   findProviderEntry,
   LLM_PROVIDERS,
+  providerLabel,
   providerRequiresKey,
   STT_PROVIDERS,
   TTS_PROVIDERS,
@@ -41,7 +42,12 @@ import { useCredentialDraftStore } from '../../stores/credentialDraftStore';
  *   `POST /api/credentials`, jamais persiste sur Mobile) : la cle est keyee
  *   PAR PROVIDER (pas par slot) et dedoublonnee via `credentialDraftStore` ;
  * - changer de provider reinitialise model/endpoint/voix aux defauts du
- *   catalogue.
+ *   catalogue ;
+ * - provider LLM realtime (`openai-realtime`/`google-live`) : la voix couvre
+ *   l'entree et la sortie, les slots TTS/STT sont masques (une note « TTS et
+ *   STT inclus dans <label> ») et leurs cles ne sont pas proposees. Regle
+ *   portee du Web (`OnboardingModal` : le bouton saute les etapes TTS/STT) et
+ *   du protocole 18/09/2026.
  *
  * Au demontage : le store conserve la derniere selection ; une selection en
  * cours incomplete (modele vide) n'est persistee que des qu'elle redevient
@@ -273,11 +279,13 @@ export default function ProvidersScreen() {
   const providers = useConfigStore((state) => state.config.providers);
   const updateProvider = useConfigStore((state) => state.updateProvider);
 
-  const selected = [
-    providers.llm.provider,
-    providers.tts.provider,
-    providers.stt.provider,
-  ].filter((id) => id !== UNCONFIGURED_PROVIDER);
+  // Un LLM realtime couvre TTS/STT : leurs formulaires (et cles) disparaissent.
+  const realtime = isRealtimeVoiceProvider(providers.llm.provider);
+  const selected = (
+    realtime
+      ? [providers.llm.provider]
+      : [providers.llm.provider, providers.tts.provider, providers.stt.provider]
+  ).filter((id) => id !== UNCONFIGURED_PROVIDER);
   const keyProviders = Array.from(new Set(selected)).filter(providerRequiresKey);
 
   return (
@@ -289,18 +297,28 @@ export default function ProvidersScreen() {
           selection={providers.llm}
           onChange={(patch) => updateProvider('llm', patch as Partial<ProviderSelection<LlmProviderId>>)}
         />
-        <ProviderSlotForm
-          title="TTS"
-          catalog={TTS_PROVIDERS}
-          selection={providers.tts}
-          onChange={(patch) => updateProvider('tts', patch as Partial<ProviderSelection<TtsProviderId>>)}
-        />
-        <ProviderSlotForm
-          title="STT"
-          catalog={STT_PROVIDERS}
-          selection={providers.stt}
-          onChange={(patch) => updateProvider('stt', patch as Partial<ProviderSelection<SttProviderId>>)}
-        />
+        {realtime ? (
+          <View style={styles.slot}>
+            <Text style={styles.realtimeNote}>
+              TTS et STT inclus dans {providerLabel(providers.llm.provider)} (voix realtime).
+            </Text>
+          </View>
+        ) : (
+          <>
+            <ProviderSlotForm
+              title="TTS"
+              catalog={TTS_PROVIDERS}
+              selection={providers.tts}
+              onChange={(patch) => updateProvider('tts', patch as Partial<ProviderSelection<TtsProviderId>>)}
+            />
+            <ProviderSlotForm
+              title="STT"
+              catalog={STT_PROVIDERS}
+              selection={providers.stt}
+              onChange={(patch) => updateProvider('stt', patch as Partial<ProviderSelection<SttProviderId>>)}
+            />
+          </>
+        )}
 
         {keyProviders.length > 0 && (
           <View style={styles.slot}>
@@ -345,6 +363,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#9ca3af',
+  },
+  realtimeNote: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#4b5563',
   },
   keysHint: {
     marginBottom: 8,
