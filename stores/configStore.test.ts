@@ -87,6 +87,26 @@ describe("configStore mutations", () => {
     expect(providers.stt).toEqual(DEFAULT_DEVICE_CONFIG.providers.stt);
   });
 
+  it("updateProvider persiste la vitesse TTS sans toucher les autres slots", () => {
+    useConfigStore.getState().updateProvider("tts", { speed: 2 });
+    const { providers } = useConfigStore.getState().config;
+    expect(providers.tts.speed).toBe(2);
+    expect(providers.llm).toEqual(DEFAULT_DEVICE_CONFIG.providers.llm);
+    expect(providers.stt).toEqual(DEFAULT_DEVICE_CONFIG.providers.stt);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledWith(useConfigStore.getState().config);
+  });
+
+  it("updateProvider persiste la vitesse du LLM realtime sans toucher les autres slots", () => {
+    useConfigStore.getState().updateProvider("llm", { provider: "openai-realtime", speed: 1.25 });
+    const { providers } = useConfigStore.getState().config;
+    expect(providers.llm.speed).toBe(1.25);
+    expect(providers.tts).toEqual(DEFAULT_DEVICE_CONFIG.providers.tts);
+    expect(providers.stt).toEqual(DEFAULT_DEVICE_CONFIG.providers.stt);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledWith(useConfigStore.getState().config);
+  });
+
   it("updateWakeWord patches the section and persists", () => {
     useConfigStore.getState().updateWakeWord({ model: "hey_mycroft" });
     expect(useConfigStore.getState().config.wakeWord.model).toBe("hey_mycroft");

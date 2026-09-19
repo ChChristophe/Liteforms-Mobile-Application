@@ -23,6 +23,9 @@ export const REALTIME_TTS_FALLBACK: ProviderSelection<TtsProviderId> = {
   model: "onnx-community/Kokoro-82M-v1.0-ONNX",
   endpoint: "",
   voiceId: null,
+  // Champ propre au slot TTS (`providers.tts.speed`) : `null` = defaut du
+  // provider. Le slot est de toute facon ignore par l'appliance en realtime.
+  speed: null,
 };
 
 /**
@@ -44,7 +47,8 @@ export const REALTIME_STT_FALLBACK: ProviderSelection<SttProviderId> = {
  * valide) est conserve ; un LLM non-realtime est retourne inchange.
  *
  * @param config configuration d'edition (peut contenir la sentinelle `"none"`).
- * @returns config envoyable sur le fil (jamais mutee).
+ * @returns config envoyable sur le fil (jamais mutee). Le slot LLM est
+ *   conserve tel quel, `llm.speed` (voix realtime, contrat 19/09/2026) inclus.
  */
 export function applyRealtimeVoiceDefaults(config: DeviceConfig): DeviceConfig {
   if (!isRealtimeVoiceProvider(config.providers.llm.provider)) return config;

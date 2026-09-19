@@ -14,7 +14,10 @@ import type {
   SttProviderId,
   TtsProviderId,
 } from '../../types/config';
-import { isRealtimeVoiceProvider, UNCONFIGURED_PROVIDER } from '../../types/config';
+import {
+  isRealtimeVoiceProvider,
+  UNCONFIGURED_PROVIDER,
+} from '../../types/config';
 import {
   findCatalogEntry,
   findProviderEntry,
@@ -24,7 +27,9 @@ import {
   STT_PROVIDERS,
   TTS_PROVIDERS,
   type ProviderCatalogEntry,
+  type SpeedRange,
 } from '../../lib/providers/catalog';
+import { clampSpeed } from '../../lib/config/validation';
 import { useConfigStore } from '../../stores/configStore';
 import { useCredentialDraftStore } from '../../stores/credentialDraftStore';
 
@@ -47,7 +52,11 @@ import { useCredentialDraftStore } from '../../stores/credentialDraftStore';
  *   l'entree et la sortie, les slots TTS/STT sont masques (une note « TTS et
  *   STT inclus dans <label> ») et leurs cles ne sont pas proposees. Regle
  *   portee du Web (`OnboardingModal` : le bouton saute les etapes TTS/STT) et
- *   du protocole 18/09/2026.
+ *   du protocole 18/09/2026 ;
+ * - vitesse de la voix (decision 19/09/2026) : le champ n'apparait que si le
+ *   provider selectionne porte une plage au catalogue — « Vitesse de la voix »
+ *   pour le LLM realtime, « Vitesse TTS » pour le TTS. Un provider sans plage
+ *   (google-live, LLM non-realtime, TTS sans plage) n'affiche rien.
  *
  * Au demontage : le store conserve la derniere selection ; une selection en
  * cours incomplete (modele vide) n'est persistee que des qu'elle redevient
@@ -63,6 +72,7 @@ function ProviderSlotForm({
   catalog,
   selection,
   onChange,
+  speedRange = null,
 }: {
   /** Titre de section affiche. */
   title: string;
@@ -72,23 +82,51 @@ function ProviderSlotForm({
   selection: ProviderSelection<any>;
   /** Commite un patch de selection au store. */
   onChange: (patch: Partial<ProviderSelection>) => void;
+  /**
+   * Plage de vitesse du provider selectionne (resolue depuis le catalogue),
+   * ou `null` si le provider n'en a pas : le champ vitesse est alors masque.
+   * Decision 19/09/2026 : la vitesse suit la voix reellement utilisee — LLM
+   * `openai-realtime` (`llm.speed`) ou TTS a plage (`tts.speed`). Aucun autre
+   * slot ne la porte (google-live et LLM non-realtime n'ont pas de plage).
+   */
+  speedRange?: SpeedRange | null;
 }) {
   const [endpointDraft, setEndpointDraft] = useState<string>(selection.endpoint ?? '');
+  const [speedDraft, setSpeedDraft] = useState<string>(
+    selection.speed === null || selection.speed === undefined
+      ? ''
+      : String(selection.speed)
+  );
+
+  /** Libelle du champ vitesse adapte au slot qui la porte. */
+  const speedLabel = title === 'TTS' ? 'Vitesse TTS' : 'Vitesse de la voix';
 
   /** Remet le slot a l'etat « non configuré » (rien de pre-active). */
   function selectNone(): void {
     setEndpointDraft('');
-    onChange({ provider: UNCONFIGURED_PROVIDER, model: '', endpoint: null, voiceId: null });
+    setSpeedDraft('');
+    onChange({
+      provider: UNCONFIGURED_PROVIDER,
+      model: '',
+      endpoint: null,
+      voiceId: null,
+      // Efface une vitesse eventuellement reglee pour le provider quitte.
+      ...(speedRange ? { speed: null } : {}),
+    });
   }
 
   /** Change de provider et reinitialise aux defauts du catalogue. */
   function selectProvider(entry: ProviderCatalogEntry): void {
     setEndpointDraft(entry.defaultEndpoint ?? '');
+    // La vitesse suit la voix : on ne garde jamais celle d'un autre provider.
+    setSpeedDraft('');
+    const nextRange = entry.speedRange ?? null;
     onChange({
       provider: entry.id,
       model: entry.defaultModel ?? '',
       endpoint: entry.defaultEndpoint,
       voiceId: entry.defaultVoice,
+      ...(speedRange || nextRange ? { speed: null } : {}),
     });
   }
 
@@ -96,6 +134,34 @@ function ProviderSlotForm({
   function commitEndpoint(): void {
     const value = endpointDraft.trim();
     onChange({ endpoint: value.length > 0 ? value : null });
+  }
+
+  /**
+   * Commite la vitesse de la voix a chaque frappe : vide = `null` (defaut du
+   * provider), nombre fini = borne dans la plage du provider, saisie non
+   * exploitable (ex. « abc », « - », `NaN`) ignoree — jamais de `NaN` sur le
+   * fil. Sans plage (champ masque) la fonction ne fait rien.
+   */
+  function handleSpeedChange(text: string): void {
+    setSpeedDraft(text);
+    if (!speedRange) return;
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      onChange({ speed: null });
+      return;
+    }
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    onChange({ speed: clampSpeed(parsed, speedRange) });
+  }
+
+  /** Resynchronise le brouillon sur la derniere valeur valide (au blur). */
+  function blurSpeed(): void {
+    setSpeedDraft(
+      selection.speed === null || selection.speed === undefined
+        ? ''
+        : String(selection.speed)
+    );
   }
 
   const isNone = selection.provider === UNCONFIGURED_PROVIDER;
@@ -228,6 +294,26 @@ function ProviderSlotForm({
             </>
           )}
 
+          {speedRange && (
+            <>
+              <Text style={styles.fieldLabel}>
+                {speedLabel} ({speedRange.min} - {speedRange.max})
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={speedDraft}
+                onChangeText={handleSpeedChange}
+                onBlur={blurSpeed}
+                placeholder="défaut du provider si vide"
+                placeholderTextColor="#9ca3af"
+                keyboardType="numeric"
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel={`${speedLabel} ${title} (${speedRange.min} - ${speedRange.max})`}
+              />
+            </>
+          )}
+
           <Text style={styles.fieldLabel}>Endpoint personnalisé (optionnel)</Text>
           <TextInput
             style={styles.input}
@@ -281,6 +367,13 @@ export default function ProvidersScreen() {
 
   // Un LLM realtime couvre TTS/STT : leurs formulaires (et cles) disparaissent.
   const realtime = isRealtimeVoiceProvider(providers.llm.provider);
+  // La vitesse suit la voix reellement utilisee (decision 19/09/2026) : LLM
+  // realtime a plage (openai-realtime) ou TTS a plage (openai, elevenlabs).
+  // La plage vient du catalogue (reference unique des bornes).
+  const llmSpeedRange =
+    findCatalogEntry(LLM_PROVIDERS, providers.llm.provider)?.speedRange ?? null;
+  const ttsSpeedRange =
+    findCatalogEntry(TTS_PROVIDERS, providers.tts.provider)?.speedRange ?? null;
   const selected = (
     realtime
       ? [providers.llm.provider]
@@ -296,6 +389,7 @@ export default function ProvidersScreen() {
           catalog={LLM_PROVIDERS}
           selection={providers.llm}
           onChange={(patch) => updateProvider('llm', patch as Partial<ProviderSelection<LlmProviderId>>)}
+          speedRange={llmSpeedRange}
         />
         {realtime ? (
           <View style={styles.slot}>
@@ -310,6 +404,7 @@ export default function ProvidersScreen() {
               catalog={TTS_PROVIDERS}
               selection={providers.tts}
               onChange={(patch) => updateProvider('tts', patch as Partial<ProviderSelection<TtsProviderId>>)}
+              speedRange={ttsSpeedRange}
             />
             <ProviderSlotForm
               title="STT"

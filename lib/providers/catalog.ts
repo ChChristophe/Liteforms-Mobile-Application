@@ -23,6 +23,13 @@ import {
   type TtsProviderId,
 } from "../../types/config";
 
+/**
+ * Plage de vitesse acceptee par un provider (`min <= max`, valeurs finies).
+ * Reference unique : le catalogue porte les bornes, les validateurs et l'UI
+ * les resolvent depuis ici (aucune duplication de bornes ailleurs).
+ */
+export type SpeedRange = { min: number; max: number };
+
 /** Entree de catalogue pour un slot provider. */
 export type ProviderCatalogEntry<P extends string = string> = {
   /** Identifiant du provider (valeur de contrat). */
@@ -46,6 +53,22 @@ export type ProviderCatalogEntry<P extends string = string> = {
    * lu automatiquement par l'appliance, openai-codex : appairage appareil).
    */
   requiresKey: boolean;
+  /**
+   * Plage de vitesse acceptee par ce provider, ou `undefined` si la vitesse
+   * n'est pas supportee (le champ n'est alors jamais emis pour ce provider).
+   *
+   * Decision produit 19/09/2026 : **la vitesse suit la voix reellement
+   * utilisee** (`DEVICE_API.md` §Blocs de vitesse). Elle est donc declaree
+   * uniquement sur les providers dont la voix est reglable :
+   * - TTS `openai` : `[0.25, 4]` (`speed` de `POST /audio/speech`) ;
+   * - TTS `elevenlabs` : `[0.7, 1.2]` (`voice_settings.speed`) ;
+   * - LLM `openai-realtime` : `[0.25, 1.5]` (`session.audio.output.speed`).
+   *
+   * Aucune autre entree n'en porte : `google-live` n'expose pas de vitesse
+   * (Gemini Live) et un LLM non-realtime est couvert par `tts.speed`.
+   * Cf. `docs/porting/tts-speed-audit.md`.
+   */
+  speedRange?: SpeedRange;
 };
 
 /** LLM testes, charte Web — execution navigateur exclue. */
@@ -82,6 +105,8 @@ export const LLM_PROVIDERS: readonly ProviderCatalogEntry<LlmProviderId>[] = [
     id: "openai-realtime",
     label: "OpenAI Realtime (TTS+STT)",
     requiresKey: true,
+    // Voix realtime reglable : `session.audio.output.speed` (plage validee).
+    speedRange: { min: 0.25, max: 1.5 },
     defaultModel: "gpt-realtime-2",
     defaultEndpoint: "wss://api.openai.com/v1/realtime",
     defaultVoice: "coral",
@@ -204,6 +229,8 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
     id: "elevenlabs",
     label: "ElevenLabs",
     requiresKey: true,
+    // `voice_settings.speed`, plage documentee par ElevenLabs.
+    speedRange: { min: 0.7, max: 1.2 },
     defaultModel: "eleven_flash_v2_5",
     defaultEndpoint: "https://api.elevenlabs.io/v1",
     defaultVoice: "CwhRBWXzGAHq8TQ4Fs17",
@@ -230,6 +257,8 @@ export const TTS_PROVIDERS: readonly ProviderCatalogEntry<TtsProviderId>[] = [
     id: "openai",
     label: "OpenAI",
     requiresKey: true,
+    // Seul TTS historique a plage de vitesse validee (0.25-4), parite desktop.
+    speedRange: { min: 0.25, max: 4 },
     defaultModel: "gpt-4o-mini-tts",
     defaultEndpoint: "https://api.openai.com/v1",
     defaultVoice: "coral",
@@ -408,7 +437,11 @@ export function providerLabel(providerId: string): string {
  *
  * - TTS/STT avec un LLM realtime : la voix du LLM couvre l'entree et la
  *   sortie, le slot est « Inclus dans <label LLM> » ;
- * - sinon : `provider · modele [— voix X]`, ou « Non configuré » (sentinel).
+ * - sinon : `provider · modele [— voix X] [— vitesse N]`, ou « Non configuré »
+ *   (sentinel). La vitesse n'apparait que quand elle est reglee (non nulle).
+ *   Elle vient de `selection.speed`, qui porte la vitesse de la **voix
+ *   reellement utilisee** : `llm.speed` quand le LLM est realtime, `tts.speed`
+ *   sinon (decision 19/09/2026).
  *
  * @param slot slot resume.
  * @param selection selection courante du slot.
@@ -424,5 +457,9 @@ export function providerSlotDisplay(
   }
   if (selection.provider === UNCONFIGURED_PROVIDER) return "Non configuré";
   const voice = selection.voiceId ? ` — voix ${selection.voiceId}` : "";
-  return `${selection.provider} · ${selection.model || "⚠ modèle requis"}${voice}`;
+  const speed =
+    selection.speed !== null && selection.speed !== undefined
+      ? ` — vitesse ${selection.speed}`
+      : "";
+  return `${selection.provider} · ${selection.model || "⚠ modèle requis"}${voice}${speed}`;
 }

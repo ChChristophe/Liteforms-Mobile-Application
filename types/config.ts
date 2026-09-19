@@ -131,6 +131,15 @@ export type SttProviderId =
  * - `model` est obligatoire (le Desktop doit savoir quoi executer) ;
  * - `endpoint` : `null` = endpoint par defaut du provider ;
  * - `voiceId` : pertinent surtout pour TTS ; `null` = voix par defaut ;
+ * - `speed` : vitesse de la **voix réellement utilisée** (décision produit
+ *   19/09/2026, `DEVICE_API.md` §Blocs de vitesse). Elle voyage dans
+ *   `providers.llm.speed` quand le LLM est realtime (`openai-realtime`, la
+ *   voix est celle du LLM) et dans `providers.tts.speed` sinon (la voix est
+ *   celle du TTS). Nombre fini dans la plage du provider (reference :
+ *   `speedRange` du catalogue) = vitesse transmise ; `null` (ou absent) =
+ *   defaut du provider. Un provider sans plage n'émet jamais ce champ.
+ *   `google-live` n'expose pas de vitesse (Gemini Live). Jamais porté par le
+ *   slot `stt`.
  * - `provider === "none"` : slot non configuré. `model`/`endpoint`/`voiceId`
  *   sont alors ignorés (normalisés à `""`/`null`/`null`) et non exigés.
  *
@@ -143,8 +152,15 @@ export type ProviderSelection<P extends string = string> = {
   model: string;
   /** URL de base personnalisee, ou `null` pour l'endpoint par defaut. */
   endpoint: string | null;
-  /** Voix selectionnee (TTS notamment), ou `null` pour la defaut. */
+  /** Voix selectionnee (TTS ou LLM realtime), ou `null` pour la defaut. */
   voiceId: string | null;
+  /**
+   * Vitesse de la voix réellement utilisée : TTS (`providers.tts.speed`) ou
+   * LLM realtime (`providers.llm.speed`). Nombre fini dans la plage du
+   * provider, ou `null` = defaut du provider ; absent si le provider n'a pas
+   * de plage (catalogue `speedRange`). Jamais porté par le slot STT.
+   */
+  speed?: number | null;
 };
 
 /**

@@ -42,7 +42,8 @@
       "provider": "elevenlabs",
       "model": "eleven_flash_v2_5",
       "endpoint": "https://api.elevenlabs.io/v1",
-      "voiceId": "CwhRBWXzGAHq8TQ4Fs17"
+      "voiceId": "CwhRBWXzGAHq8TQ4Fs17",
+      "speed": 0.9
     },
     "stt": {
       "provider": "deepgram",

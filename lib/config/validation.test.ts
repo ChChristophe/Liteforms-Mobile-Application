@@ -257,6 +257,198 @@ describe("validateDeviceConfig", () => {
     expect(DEFAULT_DEVICE_CONFIG.providers.stt.provider).toBe("none");
   });
 
+  it("le slot TTS par defaut porte speed:null, les autres slots non", () => {
+    expect(DEFAULT_DEVICE_CONFIG.providers.tts.speed).toBeNull();
+    expect(DEFAULT_DEVICE_CONFIG.providers.llm).not.toHaveProperty("speed");
+    expect(DEFAULT_DEVICE_CONFIG.providers.stt).not.toHaveProperty("speed");
+  });
+
+  it("accepte et normalise providers.tts.speed (null / absent -> null)", () => {
+    const base = {
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        tts: { provider: "openai" as const, model: "gpt-4o-mini-tts", endpoint: null, voiceId: "coral" },
+      },
+    };
+    // Absent (config stockee anterieure) -> null : migration, pas d'erreur.
+    const absent = validateDeviceConfig(base);
+    expect(absent.ok).toBe(true);
+    if (absent.ok) expect(absent.config.providers.tts.speed).toBeNull();
+
+    // null explicite -> null.
+    const explicit = validateDeviceConfig({
+      ...base,
+      providers: { ...base.providers, tts: { ...base.providers.tts, speed: null } },
+    });
+    expect(explicit.ok).toBe(true);
+    if (explicit.ok) expect(explicit.config.providers.tts.speed).toBeNull();
+  });
+
+  it("conserve une vitesse TTS valide dans les bornes", () => {
+    const result = validateDeviceConfig({
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        tts: { provider: "openai", model: "gpt-4o-mini-tts", endpoint: null, voiceId: "coral", speed: 1.5 },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.providers.tts.speed).toBe(1.5);
+  });
+
+  it("clampe une vitesse TTS finie hors bornes (miroir du clamp appliance)", () => {
+    for (const [input, expected] of [
+      [0.1, 0.25],
+      [10, 4],
+      [0.25, 0.25],
+      [4, 4],
+    ] as const) {
+      const result = validateDeviceConfig({
+        ...DEFAULT_DEVICE_CONFIG,
+        providers: {
+          ...DEFAULT_DEVICE_CONFIG.providers,
+          tts: { provider: "openai", model: "m", endpoint: null, voiceId: null, speed: input },
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.config.providers.tts.speed).toBe(expected);
+    }
+  });
+
+  it("rejette une vitesse TTS non numerique ou non finie (jamais de NaN sur le fil)", () => {
+    for (const speed of ["fast", Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = validateDeviceConfig({
+        ...DEFAULT_DEVICE_CONFIG,
+        providers: {
+          ...DEFAULT_DEVICE_CONFIG.providers,
+          tts: { provider: "openai", model: "m", endpoint: null, voiceId: null, speed },
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors.join(" ")).toContain("providers.tts.speed");
+      }
+    }
+  });
+
+  it("ignore speed sur les providers sans plage (llm non-realtime, stt)", () => {
+    const result = validateDeviceConfig({
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        llm: { provider: "openai", model: "m", endpoint: null, voiceId: null, speed: 2 },
+        stt: { provider: "deepgram", model: "m", endpoint: null, voiceId: null, speed: 2 },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.providers.llm).not.toHaveProperty("speed");
+      expect(result.config.providers.stt).not.toHaveProperty("speed");
+    }
+  });
+
+  it("accepte et clampe llm.speed pour un LLM realtime a plage (openai-realtime)", () => {
+    const withSpeed = (speed?: number | null) =>
+      validateDeviceConfig({
+        ...DEFAULT_DEVICE_CONFIG,
+        providers: {
+          ...DEFAULT_DEVICE_CONFIG.providers,
+          llm: {
+            provider: "openai-realtime",
+            model: "gpt-realtime-2",
+            endpoint: null,
+            voiceId: "coral",
+            ...(speed === undefined ? {} : { speed }),
+          },
+        },
+      });
+
+    // Absent (config stockee anterieure) et null explicite -> null (defaut).
+    for (const result of [withSpeed(), withSpeed(null)]) {
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.config.providers.llm.speed).toBeNull();
+    }
+    // Nombre fini conserve, hors bornes clampe dans [0.25, 1.5].
+    const valid = withSpeed(1.0);
+    expect(valid.ok).toBe(true);
+    if (valid.ok) expect(valid.config.providers.llm.speed).toBe(1.0);
+    for (const [input, expected] of [
+      [0.1, 0.25],
+      [9, 1.5],
+    ] as const) {
+      const clamped = withSpeed(input);
+      expect(clamped.ok).toBe(true);
+      if (clamped.ok) expect(clamped.config.providers.llm.speed).toBe(expected);
+    }
+  });
+
+  it("rejette un llm.speed non numerique ou non fini (jamais de NaN sur le fil)", () => {
+    for (const speed of ["fast", Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = validateDeviceConfig({
+        ...DEFAULT_DEVICE_CONFIG,
+        providers: {
+          ...DEFAULT_DEVICE_CONFIG.providers,
+          llm: { provider: "openai-realtime", model: "m", endpoint: null, voiceId: null, speed },
+        },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errors.join(" ")).toContain("providers.llm.speed");
+    }
+  });
+
+  it("ignore llm.speed pour google-live (Gemini Live n'expose pas de vitesse)", () => {
+    const result = validateDeviceConfig({
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        llm: { provider: "google-live", model: "m", endpoint: null, voiceId: "Kore", speed: 1.5 },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.providers.llm).not.toHaveProperty("speed");
+  });
+
+  it("clampe tts.speed dans la plage elevenlabs [0.7, 1.2]", () => {
+    const withSpeed = (speed: number) =>
+      validateDeviceConfig({
+        ...DEFAULT_DEVICE_CONFIG,
+        providers: {
+          ...DEFAULT_DEVICE_CONFIG.providers,
+          tts: {
+            provider: "elevenlabs",
+            model: "eleven_flash_v2_5",
+            endpoint: null,
+            voiceId: null,
+            speed,
+          },
+        },
+      });
+    const valid = withSpeed(0.9);
+    expect(valid.ok).toBe(true);
+    if (valid.ok) expect(valid.config.providers.tts.speed).toBe(0.9);
+    for (const [input, expected] of [
+      [0.5, 0.7],
+      [2, 1.2],
+    ] as const) {
+      const clamped = withSpeed(input);
+      expect(clamped.ok).toBe(true);
+      if (clamped.ok) expect(clamped.config.providers.tts.speed).toBe(expected);
+    }
+  });
+
+  it("n'emet pas speed pour un TTS sans plage (provider non supporte)", () => {
+    const result = validateDeviceConfig({
+      ...DEFAULT_DEVICE_CONFIG,
+      providers: {
+        ...DEFAULT_DEVICE_CONFIG.providers,
+        tts: { provider: "deepgram", model: "aura-asteria-en", endpoint: null, voiceId: null, speed: 2 },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.providers.tts).not.toHaveProperty("speed");
+  });
+
   it("ignores unknown fields (compatibility policy)", () => {
     const extra = { ...(DEFAULT_DEVICE_CONFIG as object), futureField: 42 };
     const result = validateDeviceConfig(extra);

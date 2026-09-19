@@ -1086,6 +1086,27 @@ selecteur d'animation y joue l'animation a chaud ET la persiste comme
 animations non embarquees (toutes sauf `idle_loop.vrma`) sont telechargees
 depuis l'appliance (`/animations/<f>.vrma`) et mises en cache. Tests verts.
 
+#### Statut Phase 3 — 19/09/2026 (vitesse de la voix)
+
+Décision produit : **la vitesse suit la voix réellement utilisée**. LLM
+realtime (`openai-realtime`) → nouveau `providers.llm.speed` (la voix est
+celle du LLM) ; LLM non-realtime → `providers.tts.speed` (existant), étendu à
+`elevenlabs` ; `google-live` reste sans vitesse (Gemini Live n'en expose pas).
+Contrat : `protocol/DEVICE_API.md` §Blocs de vitesse. Le flag catalogue
+`supportsSpeed` (TTS openai seul) est remplacé par une **plage par entrée**
+`speedRange` (openai `[0.25, 4]`, elevenlabs `[0.7, 1.2]`, realtime
+`[0.25, 1.5]`) — référence unique des bornes, constantes globales supprimées.
+Validation par provider (clamp, rejet du non-fini, champ non émis sans plage),
+UI au libellé adapté (LLM/TTS), wire `llm.speed`/`tts.speed`, revue, store et
+tests mis à jour ; `npx vitest run` 275 verts + typecheck OK. Audit :
+`docs/porting/tts-speed-audit.md`.
+
+#### Statut Phase 3 — 19/09/2026 (historique vitesse TTS openai-only)
+
+Première itération, superseded par le statut précédent : champ « Vitesse TTS
+(0.25 - 4) » pour le seul provider TTS `openai` (flag `supportsSpeed`),
+contrat `providers.tts.speed`.
+
 #### Gate de sortie
 
 - chaque ecran conserve le comportement fonctionnel attendu du Web ;

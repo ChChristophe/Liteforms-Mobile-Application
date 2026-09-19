@@ -72,12 +72,19 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
       model: "",
       endpoint: null,
       voiceId: null,
+      // `speed` n'apparait que quand le provider LLM est realtime supporte
+      // (`openai-realtime`, voix du LLM) ; absent sinon (la vitesse est
+      // `tts.speed`). Sentinelle "none" : pas de champ.
     },
     tts: {
       provider: "none",
       model: "",
       endpoint: null,
       voiceId: null,
+      // Vitesse de la voix TTS (`providers.tts.speed`, 19/09/2026) :
+      // `null` = defaut du provider. Forme canonique du slot TTS (la
+      // sentinelle n'est jamais serialisee) ; le slot STT ne le porte pas.
+      speed: null,
     },
     stt: {
       provider: "none",

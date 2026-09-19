@@ -28,7 +28,7 @@ const CONFIGURED: DeviceConfig = {
   ...DEFAULT_DEVICE_CONFIG,
   providers: {
     llm: { provider: "openai", model: "gpt-5.5", endpoint: null, voiceId: null },
-    tts: { provider: "elevenlabs", model: "eleven_flash_v2_5", endpoint: null, voiceId: "CwhRBWXzGAHq8TQ4Fs17" },
+    tts: { provider: "elevenlabs", model: "eleven_flash_v2_5", endpoint: null, voiceId: "CwhRBWXzGAHq8TQ4Fs17", speed: null },
     stt: { provider: "deepgram", model: "nova-3", endpoint: null, voiceId: null },
   },
 };
@@ -68,6 +68,52 @@ describe("serializeDeviceConfig / parseDeviceConfig", () => {
     };
     const parsed = JSON.parse(serializeDeviceConfig(withCue)) as DeviceConfig;
     expect(parsed.wakeWord.cue).toEqual(cue);
+  });
+
+  it("transporte providers.tts.speed sur le fil (jamais sur llm/stt)", () => {
+    const withSpeed: DeviceConfig = {
+      ...CONFIGURED,
+      providers: {
+        ...CONFIGURED.providers,
+        tts: {
+          ...CONFIGURED.providers.tts,
+          provider: "openai",
+          model: "gpt-4o-mini-tts",
+          speed: 1.5,
+        },
+      },
+    };
+    const parsed = JSON.parse(serializeDeviceConfig(withSpeed)) as DeviceConfig;
+    expect(parsed.providers.tts.speed).toBe(1.5);
+    expect(parsed.providers.llm).not.toHaveProperty("speed");
+    expect(parsed.providers.stt).not.toHaveProperty("speed");
+  });
+
+  it("transporte providers.llm.speed d'un LLM realtime sur le fil", () => {
+    const withRealtimeSpeed: DeviceConfig = {
+      ...REALTIME_EDIT,
+      providers: {
+        ...REALTIME_EDIT.providers,
+        llm: { ...REALTIME_EDIT.providers.llm, speed: 1.25 },
+      },
+    };
+    const parsed = JSON.parse(serializeDeviceConfig(withRealtimeSpeed)) as DeviceConfig;
+    expect(parsed.providers.llm.speed).toBe(1.25);
+    // Le slot TTS de repli garde sa propre vitesse (null = defaut).
+    expect(parsed.providers.tts.speed).toBeNull();
+  });
+
+  it("migre une config stockee de LLM realtime sans llm.speed (champ absent)", () => {
+    const legacy = {
+      ...REALTIME_EDIT,
+      providers: {
+        ...REALTIME_EDIT.providers,
+        llm: { provider: "openai-realtime", model: "gpt-realtime-2", endpoint: null, voiceId: "coral" },
+      },
+    };
+    const parsed = parseDeviceConfig(JSON.stringify(legacy));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.providers.llm.speed).toBeNull();
   });
 
   it("returns null for corrupted JSON without throwing", () => {
@@ -131,6 +177,12 @@ describe("applyRealtimeVoiceDefaults (remplissage du fil)", () => {
 
   it("ne touche pas une config non realtime", () => {
     expect(applyRealtimeVoiceDefaults(CONFIGURED)).toEqual(CONFIGURED);
+  });
+
+  it("le fallback TTS realtime porte speed:null (defaut du provider)", () => {
+    expect(REALTIME_TTS_FALLBACK.speed).toBeNull();
+    const wire = applyRealtimeVoiceDefaults(REALTIME_EDIT);
+    expect(wire.providers.tts.speed).toBeNull();
   });
 
   it("serialise une config realtime a slots tts/stt \"none\" (contrat 3 slots)", () => {

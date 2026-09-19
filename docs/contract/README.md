@@ -190,6 +190,13 @@ Reponse 200 :
 
 La requete est idempotente. Les champs inconnus sont ignores.
 
+Vitesse de la voix (19/09/2026) : le champ optionnel `speed` (`number | null`)
+suit la voix reellement utilisee. LLM realtime → `providers.llm.speed`
+(`openai-realtime`, `[0.25, 1.5]`) ; sinon → `providers.tts.speed`
+(`openai` `[0.25, 4]`, `elevenlabs` `[0.7, 1.2]`). `null`/absent = defaut du
+provider ; `google-live` n'expose pas de vitesse. Detail normatif :
+`protocol/DEVICE_API.md` §Blocs de vitesse.
+
 Erreur :
 
 ```json

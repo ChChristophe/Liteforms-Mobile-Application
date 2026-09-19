@@ -1,6 +1,13 @@
 import { DEFAULT_AVATAR_POSE, DEFAULT_WAKE_WORD_CUE } from "./defaults";
 import { findAnimationByUrl } from "../animations/catalog";
 import {
+  findCatalogEntry,
+  LLM_PROVIDERS,
+  TTS_PROVIDERS,
+  type ProviderCatalogEntry,
+  type SpeedRange,
+} from "../providers/catalog";
+import {
   AVATAR_MOODS,
   CHARACTER_NAME_MAX_LENGTH,
   DEVICE_CONFIG_VERSION,
@@ -24,6 +31,7 @@ import {
   type EnvironmentConfig,
   type LlmProviderId,
   type Pronouns,
+  type ProviderSelection,
   type SttProviderId,
   type TtsProviderId,
   type WakeWordConfig,
@@ -44,6 +52,21 @@ export type DeviceConfigValidation =
 
 /** Motif de couleur d'alcove : hexadecimal `#rrggbb` minuscule strict (regle Web). */
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
+
+/**
+ * Contraint une vitesse dans la plage d'un provider.
+ *
+ * Miroir du clamp applique cote appliance (le client n'est jamais de
+ * confiance) et de la saisie Mobile : une valeur finie hors bornes est
+ * ramenee a la borne la plus proche, jamais rejetee.
+ *
+ * @param speed valeur finie a contraindre.
+ * @param range plage du provider (reference : `speedRange` du catalogue).
+ * @returns vitesse dans `[range.min, range.max]`.
+ */
+export function clampSpeed(speed: number, range: SpeedRange): number {
+  return Math.min(Math.max(speed, range.min), range.max);
+}
 
 const LLM_PROVIDER_IDS: readonly LlmProviderId[] = [
   UNCONFIGURED_PROVIDER,
@@ -341,21 +364,67 @@ function validateWakeWordCue(value: unknown): WakeWordCueConfig | string {
 }
 
 /**
+ * Resout la plage de vitesse du provider porte par une selection brute, ou
+ * `null` s'il n'en a pas (provider sans plage, id inconnu, valeur malformee).
+ * Le catalogue est la reference unique des bornes.
+ */
+function resolveSpeedRange<P extends string>(
+  catalog: readonly ProviderCatalogEntry<P>[],
+  value: unknown
+): SpeedRange | null {
+  if (typeof value !== "object" || value === null) return null;
+  const providerId = (value as { provider?: unknown }).provider;
+  if (typeof providerId !== "string") return null;
+  return findCatalogEntry(catalog, providerId)?.speedRange ?? null;
+}
+
+/**
  * Valide la section providers : les trois slots doivent referencer des ids
  * de leurs unions respectives, avec un modele non vide.
+ *
+ * La vitesse suit la voix reellement utilisee (contrat 19/09/2026) : elle est
+ * acceptee pour le slot `llm` quand son provider est realtime a plage
+ * (`providers.llm.speed`) et pour le slot `tts` quand son provider a une plage
+ * (`providers.tts.speed`). Un provider sans plage n'emet jamais `speed`
+ * (`llm` non-realtime, `google-live`, TTS sans plage) ; le slot `stt` n'en
+ * porte jamais.
+ *
  * @returns la config validee, ou une chaine decrivant l'erreur.
  */
 function validateProviders(value: unknown): DeviceConfig["providers"] | string {
   if (typeof value !== "object" || value === null) return "providers must be an object";
   const v = value as Record<string, unknown>;
-  const llm = validateSelection(v.llm, LLM_PROVIDER_IDS, "providers.llm");
+  const llm = validateSelection(v.llm, LLM_PROVIDER_IDS, "providers.llm", {
+    speedRange: resolveSpeedRange(LLM_PROVIDERS, v.llm),
+  });
   if (typeof llm === "string") return llm;
-  const tts = validateSelection(v.tts, TTS_PROVIDER_IDS, "providers.tts");
+  const tts = validateSelection(v.tts, TTS_PROVIDER_IDS, "providers.tts", {
+    speedRange: resolveSpeedRange(TTS_PROVIDERS, v.tts),
+    // Le slot TTS garde la cle canonique `speed: null` sur la sentinelle
+    // (forme locale, jamais serialisee) ; un provider configure sans plage
+    // n'emet pas le champ.
+    slotCarriesSpeed: true,
+  });
   if (typeof tts === "string") return tts;
   const stt = validateSelection(v.stt, STT_PROVIDER_IDS, "providers.stt");
   if (typeof stt === "string") return stt;
   return { llm, tts, stt };
 }
+
+/** Options de validation du champ `speed` d'une selection provider. */
+type SpeedValidationOptions = {
+  /**
+   * Plage du provider selectionne (resolue depuis le catalogue), ou `null`
+   * s'il n'en a pas : dans ce cas le champ `speed` n'est pas emis.
+   */
+  speedRange?: SpeedRange | null;
+  /**
+   * `true` si le slot peut porter `speed` dans sa forme locale (slot TTS) :
+   * la sentinelle `"none"` conserve alors `speed: null`. Sans effet sur un
+   * provider configure sans plage (champ toujours omis).
+   */
+  slotCarriesSpeed?: boolean;
+};
 
 /**
  * Valide une selection de provider contre l'union de son slot.
@@ -364,15 +433,27 @@ function validateProviders(value: unknown): DeviceConfig["providers"] | string {
  * model/endpoint/voiceId (normalisés à `""`/`null`/`null`) ; c'est un état
  * d'édition valide, jamais envoyable (`serializeDeviceConfig` le refuse).
  *
+ * Vitesse (contrat 19/09/2026) : le champ n'est accepté que lorsque le
+ * provider selectionne porte une plage (`options.speedRange`) — `llm.speed`
+ * pour un LLM realtime, `tts.speed` pour un TTS a plage :
+ * - absent ou `null` est normalise a `null` (defaut du provider, migration
+ *   d'une config stockee anterieure, `configVersion` inchangee) ;
+ * - un nombre fini est **clampé** dans la plage (miroir du clamp appliance) ;
+ * - une valeur non numerique ou non finie fait echouer la validation ;
+ * - un provider sans plage n'emet pas le champ (un `speed` entrant est ignore,
+ *   politique de compatibilite PLAN.md 5.3).
+ *
  * @param path chemin du slot dans les messages d'erreur.
  * @param allowedIds identifiants valides pour ce slot.
+ * @param options plage du provider et forme locale du slot.
  * @returns la selection validee, ou une chaine decrivant l'erreur.
  */
 function validateSelection<P extends string>(
   value: unknown,
   allowedIds: readonly P[],
-  path: string
-): { provider: P; model: string; endpoint: string | null; voiceId: string | null } | string {
+  path: string,
+  options: SpeedValidationOptions = {}
+): ProviderSelection<P> | string {
   if (typeof value !== "object" || value === null) return `${path} must be an object`;
   const v = value as Record<string, unknown>;
   if (typeof v.provider !== "string" || !allowedIds.includes(v.provider as P)) {
@@ -380,7 +461,13 @@ function validateSelection<P extends string>(
   }
   const provider = v.provider as P;
   if (provider === UNCONFIGURED_PROVIDER) {
-    return { provider, model: "", endpoint: null, voiceId: null };
+    return {
+      provider,
+      model: "",
+      endpoint: null,
+      voiceId: null,
+      ...(options.slotCarriesSpeed ? { speed: null } : {}),
+    };
   }
   if (typeof v.model !== "string" || v.model.length === 0) {
     return `${path}.model must be a non-empty string`;
@@ -391,11 +478,31 @@ function validateSelection<P extends string>(
   if (v.voiceId !== null && typeof v.voiceId !== "string") {
     return `${path}.voiceId must be a string or null`;
   }
+  const range = options.speedRange ?? null;
+  if (range === null) {
+    // Provider sans plage : `speed` n'a pas de sens, jamais emis.
+    return {
+      provider,
+      model: v.model,
+      endpoint: v.endpoint as string | null,
+      voiceId: v.voiceId as string | null,
+    };
+  }
+  const raw = v.speed;
+  let speed: number | null;
+  if (raw === undefined || raw === null) {
+    speed = null;
+  } else if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return `${path}.speed must be a finite number or null`;
+  } else {
+    speed = clampSpeed(raw, range);
+  }
   return {
     provider,
     model: v.model,
     endpoint: v.endpoint as string | null,
     voiceId: v.voiceId as string | null,
+    speed,
   };
 }
 
