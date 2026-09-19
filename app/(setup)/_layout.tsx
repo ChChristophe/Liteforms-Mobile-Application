@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { Link } from 'expo-router';
 import { Pressable, Text } from 'react-native';
+import { ConnectionStatusDot } from '../../components/connection/ConnectionStatusDot';
 
 /**
  * Layout du groupe `(setup)`.
@@ -8,10 +9,21 @@ import { Pressable, Text } from 'react-native';
  * Les ecrans du wizard s'empilent avec un entete natif (bouton retour
  * systeme) ; l'entree du groupe reste sans entete. Chaque ecran declare ici
  * son titre pour la barre native. Le groupe reste accessible hors reseau.
+ *
+ * `headerRight` partage : la pastille de liaison Mobile <-> Electron est
+ * affichee sur tous les ecrans a entete. Un ecran peut la remplacer en
+ * declarant son propre `headerRight` (cas de `avatar-preview`, harnais de
+ * dev) — comportement existant conserve.
  */
 export default function SetupLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false }} initialRouteName="index">
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        headerRight: () => <ConnectionStatusDot />,
+      }}
+      initialRouteName="index"
+    >
       <Stack.Screen name="index" />
       <Stack.Screen
         name="character"

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useConfigStore } from '../../stores/configStore';
 import { useOnboardingStore } from '../../stores/onboardingStore';
 import { wakeWordLabel } from '../../lib/wakeword/catalog';
+import { ConnectionStatusDot } from '../../components/connection/ConnectionStatusDot';
 
 /** Entree du menu de configuration. */
 type MenuEntry = {
@@ -106,8 +107,15 @@ export default function SetupIndexScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content} bounces={false}>
-        <Text style={styles.title}>Liteforms</Text>
-        <Text style={styles.subtitle}>Configuration de votre avatar</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerTitles}>
+            <Text style={styles.title}>Liteforms</Text>
+            <Text style={styles.subtitle}>Configuration de votre avatar</Text>
+          </View>
+          {/* L'ecran n'a pas d'en-tete natif : la pastille de liaison est
+              posee en haut a droite, meme role que le headerRight partage. */}
+          <ConnectionStatusDot />
+        </View>
         <View style={styles.menu}>
           {entries.map((entry) => (
             <Pressable
@@ -140,15 +148,24 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 24,
   },
-  title: {
+  headerRow: {
     marginTop: 24,
+    marginBottom: 28,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  headerTitles: {
+    flex: 1,
+  },
+  title: {
     fontSize: 32,
     fontWeight: '700',
     color: '#111827',
   },
   subtitle: {
     marginTop: 4,
-    marginBottom: 28,
     fontSize: 16,
     color: '#6b7280',
   },

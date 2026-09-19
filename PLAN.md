@@ -1613,6 +1613,35 @@ hotspot réel (bascule Windows), scan iOS (adresse sur interface correcte),
 debordement ~10 s du scan /24 sur register Cellular (cartes SIM actives :
 le Cellular renseigne une IP — validation du /24 faux a couvrir).
 
+#### Statut Phase 6 — 19/09/2026 : indicateur de liaison « bille de statut »
+
+Ajout d'une pastille d'etat unique (aucun texte a cote) dans les en-tetes du
+wizard (`app/(setup)/_layout.tsx`, `headerRight` partage) et en haut a droite
+du menu (`app/(setup)/index.tsx`, ecran sans en-tete) :
+
+- `lib/connection/status.ts` : logique pure `deriveConnectionStatus` (vert
+  connecte / ambre `checking` / rouge deconnecte, **priorite au check en
+  cours** — un health check est plus recent qu'un ancien succes), couleurs
+  produit (#22c55e / #f59e0b / #ef4444), libelles d'accessibilite et message
+  par defaut ;
+- `components/connection/ConnectionStatusDot.tsx` : pastille + panneau au tap
+  (etat, `lastError`, « Reverifier » = `checkHealth`, lien `/connect`), cible
+  tactile ≥ 44x44, aucune donnee sensible (ni nom d'appliance ni IP) ;
+- `lib/connection/status.test.ts` : 3 etats, priorite checking > connecte,
+  messages par defaut et choix du detail (erreur reelle prime, erreur
+  perimee jamais affichee pendant un check) ; `npx vitest run` 21 fichiers /
+  284 tests verts, `npm run typecheck` OK.
+
+`avatar-preview` conserve son `headerRight` specifique (harnais dev) : la
+pastille n'y est pas ajoutee.
+
+> **Question ouverte mise de côté (a etudier a la fin, rien ne presse)** —
+> token OpenClaw non recupere automatiquement par l'appareil au boot : le
+> Mobile ne voit jamais le token (`GET /api/provider-status` renvoie `configured` +
+> masque, jamais la valeur). Piste : statut dedie (ex. « token manquant »)
+> + action de reparation cote Mobile (re-envoi ou regeneration) quand le
+> probleme sera reproduit. Bloque par l'absence de signal cote appareil.
+
 ---
 
 ### Phase 7 — Synchronisation live et reconnexion
