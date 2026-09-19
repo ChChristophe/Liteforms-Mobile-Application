@@ -1328,6 +1328,31 @@ posees a l'ecran (sous `AvatarPreview`), le composant GL critique n'est pas
 touche ; le bandeau ne peut pas deborder (ecran a hauteur fixe, pas de
 scrollable). L'ecran Ambiance reutilise MoodChips, comportement inchange.
 
+#### Statut Phase 4 — 19/09/2026 : recentrage des hips de l'idle (fin de derive)
+
+Port Mobile du correctif Web `050c195` (deja porte Electron `07765e8`) : l'idle
+VRMA derivait lateralement car la piste de position des hips portait une
+translation X/Z moyenne non nulle. Nouveau module `lib/avatar/vrmAnimationClip.ts`
+(`recenterHipsTranslation`, pure logique three, no-op si pas de noeud hips /
+piste absente / piste vide), applique aux DEUX sites `createVRMAnimationClip` de
+`previewRuntime.ts` (idle de demarrage + `playAnimation`) car le Web recentre
+tous les clips via `loadVrmAnimationClip`. `idle_loop.vrma` est byte-identique
+(SHA256 `ACE95BA6…`) dans Web, Electron et Mobile : le meme clip est corrige.
+
+Tests `vrmAnimationClip.test.ts` (7 cas : moyennes X/Z soustraites, Y/sway
+preserves, autres pistes intactes, no-op sans hips / piste absente / type non
+vector / piste vide) ; `npx vitest run` 20 fichiers / 253 tests verts,
+`npm run typecheck` OK. Fiche d'audit `docs/porting/recenter-hips-audit.md`
+(PLAN.md §6.5).
+
+**Lecon** : un correctif de rendu Web `Jarvis:` ne se propage pas
+automatiquement au preview Mobile — le chemin de creation des clips
+(`createVRMAnimationClip`) est le point d'application a verifier a chaque
+portage d'asset VRMA.
+**Reste** : validation visuelle sur appareil (absence de derive laterale) a
+confirmer par le porteur ; le clip est mute en place (a cloner si un jour
+plusieurs runtimes partagent un `AnimationClip`).
+
 ---
 
 ### Phase 5 — Selection et catalogue VRM

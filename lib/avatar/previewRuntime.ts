@@ -9,6 +9,7 @@ import {
 import * as THREE from "three";
 import type { ExpoWebGLRenderingContext } from "expo-gl";
 import { applyAlcoveTint } from "./environmentTint";
+import { recenterHipsTranslation } from "./vrmAnimationClip";
 import {
   computeInsetFootprint,
   computeModelPositionFromBounds,
@@ -619,9 +620,14 @@ export async function startPreviewRuntime(
   const idleVrma = await parseVrmAnimation(buffers.animation);
   if (idleVrma) {
     // three-vrm v3 : le clip passe par la fonction libre (pas une methode).
-    idleClip = createVRMAnimationClip(
-      idleVrma,
-      vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+    // Recentrage des hips (correctif Web 050c195) : sans lui, l'idle VRMA
+    // derive lateralement.
+    idleClip = recenterHipsTranslation(
+      createVRMAnimationClip(
+        idleVrma,
+        vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+      ),
+      vrm
     );
     mixer = new THREE.AnimationMixer(vrm.scene);
     idleAction = mixer.clipAction(idleClip);
@@ -710,9 +716,14 @@ export async function startPreviewRuntime(
       if (animation === null) {
         throw new Error("Animation VRMA invalide (aucune piste lisible).");
       }
-      const clip = createVRMAnimationClip(
-        animation,
-        vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+      // Meme recentrage que l'idle : Web l'applique a TOUS les clips via
+      // `loadVrmAnimationClip` (idle ET fidgets).
+      const clip = recenterHipsTranslation(
+        createVRMAnimationClip(
+          animation,
+          vrm as unknown as Parameters<typeof createVRMAnimationClip>[1]
+        ),
+        vrm
       );
       const action = mixer.clipAction(clip);
       action.reset();
