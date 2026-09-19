@@ -1613,7 +1613,7 @@ hotspot réel (bascule Windows), scan iOS (adresse sur interface correcte),
 debordement ~10 s du scan /24 sur register Cellular (cartes SIM actives :
 le Cellular renseigne une IP — validation du /24 faux a couvrir).
 
-#### Statut Phase 6 — 19/09/2026 : indicateur de liaison « bille de statut »
+#### Statut Phase 6 — 19/09/2026 : indicateur de liaison « bille de statut » (validé terrain 19/09)
 
 Ajout d'une pastille d'etat unique (aucun texte a cote) dans les en-tetes du
 wizard (`app/(setup)/_layout.tsx`, `headerRight` partage) et en haut a droite
@@ -1634,6 +1634,9 @@ du menu (`app/(setup)/index.tsx`, ecran sans en-tete) :
 
 `avatar-preview` conserve son `headerRight` specifique (harnais dev) : la
 pastille n'y est pas ajoutee.
+
+**Valide terrain 19/09/2026** : la pastille et son panneau (etats, erreur,
+« Reverifier », lien connexion) fonctionnent sur appareil.
 
 > **Question ouverte mise de côté (a etudier a la fin, rien ne presse)** —
 > token OpenClaw non recupere automatiquement par l'appareil au boot : le
