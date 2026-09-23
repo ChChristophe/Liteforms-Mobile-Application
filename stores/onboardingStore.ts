@@ -62,7 +62,10 @@ export type OnboardingStore = {
   /**
    * Reconnexion automatique au lancement, ou premiere association par scan :
    * coordonnees connues -> health check direct ; sinon scan du /24 courant
-   * (match strict sur le deviceId appris deja connu, le cas echeant).
+   * (match strict sur le deviceId appris deja connu, le cas echeant) ; en
+   * dernier recours, scan du mode provisioning (mobile deja sur le hotspot
+   * Electron, ou la device API 43178 est en loopback et seul le port 8080
+   * repond) -> phase `wifiForm`.
    */
   startDiscovery: () => Promise<void>;
   /**
@@ -139,6 +142,20 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
         set({ phase: "connected" });
         return;
       }
+    }
+
+    // 3. Mode provisioning : mobile deja sur le hotspot Electron. La device
+    //    API 43178 est en loopback cote Electron (non joignable depuis le
+    //    telephone) ; seul le serveur de provisioning 8080 repond. Sans ce
+    //    scan, un lancement sur le hotspot resterait bloque sur needHotspot.
+    const onHotspot = await discoverScan(null, true);
+    if (onHotspot !== null) {
+      set({
+        hotspot: onHotspot,
+        phase: "wifiForm",
+        lastError: null,
+      });
+      return;
     }
     set({
       phase: "needHotspot",
@@ -265,6 +282,8 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
 
 /**
  * Scan LAN ou hotspot, DRY pour les trois actions : `null` = rien trouve.
+ * Trace en dev (gated `__DEV__`, terminal Metro) l'IP locale, le mode de
+ * scan et le resultat — IP/deviceId sont non secrets.
  * @param expectedDeviceId deviceId a matcher strictement, ou `null`.
  * @param provisioning accepter le mode provisioning (mobile sur hotspot).
  * @param localIp IP locale, sinon devinee via `getLocalIpAddress`.
@@ -279,6 +298,17 @@ async function discoverScan(
     deviceId: expectedDeviceId,
     acceptProvisioning: provisioning,
   });
+  // Trace dev grep-able ; `typeof` protege le runtime vitest/node ou
+  // `__DEV__` n'est pas defini. Jamais de secret ici (IP/deviceId publics).
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    const mode = provisioning ? "provisioning:8080" : "lan:43178";
+    const outcome = result.ok
+      ? `${result.host}:${result.port} deviceId=${result.deviceId ?? "none"}`
+      : "none";
+    console.log(
+      `[discovery] localIp=${ip ?? "none"} scan=${mode} result=${outcome}`
+    );
+  }
   if (!result.ok) return null;
   return {
     host: result.host,

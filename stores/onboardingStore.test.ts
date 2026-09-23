@@ -22,6 +22,7 @@ vi.mock("../lib/network/deviceClient", () => ({
   fetchDesktopHealth: vi.fn(),
   sendWifiProvisioning: vi.fn(),
   fetchProvisioningStatus: vi.fn(),
+  sendDeviceConfig: vi.fn(),
   hasProvisioningStatus: vi.fn(
     (r: { reachable: boolean; status?: unknown; invalid?: boolean }) =>
       r.reachable && !(r as { invalid?: boolean }).invalid
@@ -40,6 +41,7 @@ import {
 import {
   fetchDesktopHealth,
   fetchProvisioningStatus,
+  sendDeviceConfig,
   sendWifiProvisioning,
 } from "../lib/network/deviceClient";
 import { discoverDesktop, getLocalIpAddress } from "../lib/network/discovery";
@@ -50,6 +52,7 @@ const mockLoad = vi.mocked(loadConnectionInfo);
 const mockClear = vi.mocked(clearConnectionInfo);
 const mockHealth = vi.mocked(fetchDesktopHealth);
 const mockSendWifi = vi.mocked(sendWifiProvisioning);
+const mockSendConfig = vi.mocked(sendDeviceConfig);
 const mockStatus = vi.mocked(fetchProvisioningStatus);
 const mockDiscover = vi.mocked(discoverDesktop);
 const mockLocalIp = vi.mocked(getLocalIpAddress);
@@ -124,6 +127,36 @@ describe("onboardingStore.startDiscovery", () => {
     mockDiscover.mockResolvedValue({ ok: false, error: "rien" });
     await useOnboardingStore.getState().startDiscovery();
     expect(useOnboardingStore.getState().phase).toBe("needHotspot");
+  });
+
+  it("LAN vide puis hotspot provisioning trouvé = wifiForm, sans device-config", async () => {
+    // Aucune coordonnée stockée : le lancement sur le hotspot Liteforms-Setup
+    // ne doit plus exiger « Relancer la recherche ».
+    mockDiscover
+      .mockResolvedValueOnce({ ok: false, error: "rien" })
+      .mockResolvedValueOnce({
+        ok: true,
+        host: "192.168.4.1",
+        port: 8080,
+        deviceId: "desktop-8f31",
+        name: "Liteforms Desktop",
+      });
+    await useOnboardingStore.getState().startDiscovery();
+    expect(useOnboardingStore.getState().phase).toBe("wifiForm");
+    expect(useOnboardingStore.getState().hotspot).toEqual({
+      host: "192.168.4.1",
+      port: 8080,
+      deviceId: "desktop-8f31",
+      name: "Liteforms Desktop",
+    });
+    // Le 2e scan est bien le mode provisioning (port 8080, pas de match strict).
+    expect(mockDiscover).toHaveBeenLastCalledWith("192.168.1.42", {
+      deviceId: null,
+      acceptProvisioning: true,
+    });
+    // On apprend le hotspot, on ne se connecte pas et on n'envoie pas la config.
+    expect(useConnectionStore.getState().host).toBe(null);
+    expect(mockSendConfig).not.toHaveBeenCalled();
   });
 });
 
