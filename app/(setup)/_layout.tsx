@@ -73,6 +73,10 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Desktop' }}
       />
       <Stack.Screen
+        name="hue"
+        options={{ headerShown: true, title: 'Philips Hue' }}
+      />
+      <Stack.Screen
         name="connect"
         options={{ headerShown: true, title: 'Connexion' }}
       />

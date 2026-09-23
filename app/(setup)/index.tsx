@@ -23,6 +23,7 @@ type MenuEntry = {
      | '/review'
       | '/avatar-preview'
       | '/desktop'
+      | '/hue'
       | '/connect';
 };
 
@@ -96,6 +97,11 @@ export default function SetupIndexScreen() {
       title: 'Desktop',
       subtitle: 'Statut la connexion et re-reconnexion de l\'appliance',
       href: '/desktop',
+    },
+    {
+      title: 'Philips Hue',
+      subtitle: 'Appairage du bridge Hue depuis le téléphone',
+      href: '/hue',
     },
     {
       title: 'Connexion',

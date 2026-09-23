@@ -860,7 +860,7 @@ export async function getProviderStatus(
  *   `unreachable` ;
  * - le reste est decrit tel quel (redaction `redactText` par l'appelant).
  */
-function describeNetworkFailure(
+export function describeNetworkFailure(
   error: unknown,
   timeoutMs: number
 ): string {

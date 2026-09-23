@@ -201,3 +201,49 @@ export type ProviderStatusResponse = {
 
 /** Resultat de `getProviderStatus`, exploitable par l'UI. */
 export type ProviderStatusResult = ProviderStatusResponse | { ok: false; error: string };
+
+/**
+ * Reponse de `GET /api/hue/status` (protocole 23/09/2026, appairage Philips
+ * Hue pilote par le Mobile). Ne contient jamais la cle d'application Hue :
+ * seuls l'etat d'appairage, l'IP du bridge et le nombre de lumieres.
+ */
+export type HueStatusResponse = {
+  /** `true` : reponse conforme de l'appliance. */
+  ok: true;
+  /** Une cle est stockee ET le bridge repond. */
+  paired: boolean;
+  /** IP du bridge appaire, ou `null`. */
+  bridgeIp: string | null;
+  /** Nombre de lumieres, ou `null` (non appaire / injoignable). */
+  lightCount: number | null;
+};
+
+/** Resultat de `fetchHueStatus`, exploitable par l'UI. */
+export type HueStatusResult = HueStatusResponse | { ok: false; error: string };
+
+/**
+ * Reponse de `POST /api/hue/pair` (route bloquante, jusqu'a ~35 s) : appairage
+ * reussi, bridge identifie. La cle n'est jamais renvoyee.
+ */
+export type HuePairResponse = {
+  /** `true` : appairage reussi. */
+  ok: true;
+  /** Toujours `true` en succes. */
+  paired: true;
+  /** IP du bridge appaire. */
+  bridgeIp: string;
+};
+
+/** Resultat de `pairHue`, exploitable par l'UI. */
+export type HuePairResult = HuePairResponse | { ok: false; error: string };
+
+/** Reponse de `POST /api/hue/unpair` : configuration Hue purgee. */
+export type HueUnpairResponse = {
+  /** `true` : purge acceptee. */
+  ok: true;
+  /** Toujours `false` apres purge. */
+  paired: false;
+};
+
+/** Resultat de `unpairHue`, exploitable par l'UI. */
+export type HueUnpairResult = HueUnpairResponse | { ok: false; error: string };
