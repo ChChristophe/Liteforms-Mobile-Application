@@ -24,6 +24,9 @@ type MenuEntry = {
       | '/avatar-preview'
       | '/desktop'
       | '/hue'
+      | '/news'
+      | '/spotify'
+      | '/spotify-devices'
       | '/connect';
 };
 
@@ -102,6 +105,16 @@ export default function SetupIndexScreen() {
       title: 'Philips Hue',
       subtitle: 'Appairage du bridge Hue depuis le téléphone',
       href: '/hue',
+    },
+    {
+      title: 'Revue de presse',
+      subtitle: 'Flux suivis (blogwatcher) et recherche de nouveaux articles',
+      href: '/news',
+    },
+    {
+      title: 'Spotify',
+      subtitle: 'Connexion du compte et nommage des appareils',
+      href: '/spotify',
     },
     {
       title: 'Connexion',

@@ -247,3 +247,226 @@ export type HueUnpairResponse = {
 
 /** Resultat de `unpairHue`, exploitable par l'UI. */
 export type HueUnpairResult = HueUnpairResponse | { ok: false; error: string };
+
+/**
+ * Un flux suivi par la revue de presse (skill OpenClaw `blogwatcher`).
+ * Forme des entrees de `GET /api/news/status` et de `POST /api/news/feeds`
+ * (protocole 24/09/2026). Aucun secret : la source de verite est le SQLite
+ * `blogwatcher` de l'appliance.
+ */
+export type NewsFeed = {
+  /** Nom du flux (unique cote appliance). */
+  name: string;
+  /** URL du site ou du flux declaree par l'utilisateur. */
+  url: string;
+  /** URL du flux RSS decouverte, ou `null` si absente. */
+  feedUrl: string | null;
+  /** Derniere analyse ISO 8601, ou `null` si jamais analyse. */
+  lastScanned: string | null;
+};
+
+/**
+ * Reponse de `GET /api/news/status` (protocole 24/09/2026). La route reste
+ * 200 meme si `blogwatcher` est absent (`available: false`, `feeds: []`,
+ * `unreadCount: null`).
+ */
+export type NewsStatusResponse = {
+  /** `true` : reponse conforme de l'appliance. */
+  ok: true;
+  /** La CLI `blogwatcher` repond cote appliance. */
+  available: boolean;
+  /** Flux suivis, tries par nom. */
+  feeds: NewsFeed[];
+  /** Nombre d'articles non lus, ou `null` si indisponible. */
+  unreadCount: number | null;
+};
+
+/** Resultat de `fetchNewsStatus`, exploitable par l'UI. */
+export type NewsStatusResult = NewsStatusResponse | { ok: false; error: string };
+
+/** Reponse de `POST /api/news/feeds` : le flux ajoute (jamais de secret). */
+export type NewsAddResponse = {
+  /** `true` : flux accepte par l'appliance. */
+  ok: true;
+  /** Flux cree tel que renvoye par l'appliance. */
+  feed: NewsFeed;
+};
+
+/** Resultat de `addNewsFeed`, exploitable par l'UI. */
+export type NewsAddResult = NewsAddResponse | { ok: false; error: string };
+
+/** Reponse de `POST /api/news/feeds/remove` : flux (et articles) supprime. */
+export type NewsRemoveResponse = {
+  /** `true` : suppression acceptee. */
+  ok: true;
+};
+
+/** Resultat de `removeNewsFeed`, exploitable par l'UI. */
+export type NewsRemoveResult = NewsRemoveResponse | { ok: false; error: string };
+
+/** Detail par flux d'une analyse `POST /api/news/scan`. */
+export type NewsScanFeed = {
+  /** Nom du flux analyse. */
+  name: string;
+  /** Nouveaux articles trouves pour ce flux. */
+  newArticles: number;
+  /** Articles au total trouves pour ce flux. */
+  totalFound: number;
+  /** Source utilisee pour decouvrir les articles. */
+  source: "rss" | "html" | "none";
+  /** Message d'echec du flux, absent en succes (compte alors 0). */
+  error?: string;
+};
+
+/**
+ * Reponse de `POST /api/news/scan` (route bloquante, jusqu'a ~60 s) :
+ * total des nouveaux articles et detail par flux.
+ */
+export type NewsScanResponse = {
+  /** `true` : analyse terminee. */
+  ok: true;
+  /** Total des nouveaux articles, tous flux confondus. */
+  newArticles: number;
+  /** Detail par flux analyse. */
+  feeds: NewsScanFeed[];
+};
+
+/** Resultat de `scanNews`, exploitable par l'UI. */
+export type NewsScanResult = NewsScanResponse | { ok: false; error: string };
+
+/**
+ * Reponse de `POST /api/news/setup` (protocole 24/09/2026, route bloquante
+ * jusqu'a ~60 s) : installation de la CLI `blogwatcher` sur l'appliance.
+ * `installed` vaut `false` quand le binaire etait deja present (idempotent).
+ */
+export type NewsSetupResponse = {
+  /** `true` : operation d'installation terminee. */
+  ok: true;
+  /** `true` si le binaire vient d'etre installe, `false` s'il etait deja la. */
+  installed: boolean;
+  /** `true` si la CLI repond apres l'operation. */
+  available: boolean;
+  /** Version installee/epinglee. */
+  version: string;
+};
+
+/** Resultat de `setupNews`, exploitable par l'UI. */
+export type NewsSetupResult = NewsSetupResponse | { ok: false; error: string };
+
+/**
+ * Reponse de `GET /api/spotify/status` (protocole 24/09/2026, Spotify pilote
+ * par le Mobile). Ne contient jamais de token : seuls la presence d'un token
+ * stocke (`configured`) et la disponibilite de la CLI `spogo` (`available`).
+ */
+export type SpotifyStatusResponse = {
+  /** `true` : reponse conforme de l'appliance. */
+  ok: true;
+  /** Un token Spotify est stocke cote appliance. */
+  configured: boolean;
+  /** La CLI `spogo` repond cote appliance. */
+  available: boolean;
+};
+
+/** Resultat de `fetchSpotifyStatus`, exploitable par l'UI. */
+export type SpotifyStatusResult = SpotifyStatusResponse | { ok: false; error: string };
+
+/**
+ * Un appareil Spotify vu par l'appliance (`GET /api/spotify/devices`).
+ * `alias` est le nom donne par l'utilisateur (source unique cote appliance),
+ * `isDefault` l'appareil cible par defaut.
+ */
+export type SpotifyDevice = {
+  /** Identifiant Spotify de l'appareil. */
+  id: string;
+  /** Nom d'origine de l'appareil (ex. `55OLED935/12`). */
+  name: string;
+  /** Type d'appareil (ex. `TV`, `Computer`, `Smartphone`). */
+  type: string;
+  /** `true` si l'appareil lit actuellement. */
+  isActive: boolean;
+  /** Alias utilisateur, ou `null` si aucun. */
+  alias: string | null;
+  /** `true` si l'appareil est la cible par defaut. */
+  isDefault: boolean;
+};
+
+/** Reponse de `GET /api/spotify/devices`. */
+export type SpotifyDevicesResponse = {
+  /** `true` : liste conforme de l'appliance. */
+  ok: true;
+  /** Appareils Spotify connus. */
+  devices: SpotifyDevice[];
+};
+
+/** Resultat de `fetchSpotifyDevices`, exploitable par l'UI. */
+export type SpotifyDevicesResult = SpotifyDevicesResponse | { ok: false; error: string };
+
+/**
+ * Corps de `POST /api/spotify/auth` : le refresh token est la source de verite
+ * (l'access token peut etre absent, spogo le rafraichit). Aucun secret n'est
+ * conserve cote Mobile : le token part vers l'appliance.
+ */
+export type SpotifyAuthRequest = {
+  /** Client ID public de Liteforms (embarque, non secret). */
+  clientId: string;
+  /** Refresh token OAuth (source de verite cote appliance). */
+  refreshToken: string;
+  /** Access token initial, optionnel. */
+  accessToken?: string;
+  /** Scopes accordes, optionnel. */
+  scope?: string;
+  /** Duree de vie de l'access token en secondes, optionnel. */
+  expiresIn?: number;
+};
+
+/** Reponse de `POST /api/spotify/auth` en succes : token stocke. */
+export type SpotifyAuthAck = {
+  /** `true` : token accepte et stocke. */
+  ok: true;
+  /** Toujours `true` en succes. */
+  configured: true;
+};
+
+/** Resultat de `sendSpotifyToken`, exploitable par l'UI. */
+export type SpotifyAuthResult = SpotifyAuthAck | { ok: false; error: string };
+
+/** Reponse de `POST /api/spotify/devices/aliases` (alias ou defaut). */
+export type SpotifyAliasResponse = {
+  /** `true` : mise a jour acceptee. */
+  ok: true;
+};
+
+/** Resultat de `setSpotifyAlias` / `setSpotifyDefault`, exploitable par l'UI. */
+export type SpotifyAliasResult = SpotifyAliasResponse | { ok: false; error: string };
+
+/** Actions acceptees par `POST /api/spotify/control`. */
+export type SpotifyControlAction =
+  | "play"
+  | "pause"
+  | "resume"
+  | "next"
+  | "previous"
+  | "volume_up"
+  | "volume_down"
+  | "mute"
+  | "status";
+
+/** Corps de `POST /api/spotify/control`. */
+export type SpotifyControlRequest = {
+  /** Action de lecture a executer. */
+  action: SpotifyControlAction;
+  /** Titre/artiste/album/playlist pour `play`. */
+  query?: string;
+  /** Alias ou nom de l'appareil cible (sinon defaut, sinon actif). */
+  device?: string;
+};
+
+/**
+ * Reponse de `POST /api/spotify/control` en succes : `ok` plus des champs
+ * specifiques a l'action (ex. `status` renvoie l'etat courant). Index signature
+ * volontaire : le contrat ne fige pas les champs additionnels.
+ */
+export type SpotifyControlResponse = { ok: true } & Record<string, unknown>;
+
+/** Resultat de `spotifyControl`, exploitable par l'UI. */
+export type SpotifyControlResult = SpotifyControlResponse | { ok: false; error: string };

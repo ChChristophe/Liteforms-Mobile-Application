@@ -77,6 +77,18 @@ export default function SetupLayout() {
         options={{ headerShown: true, title: 'Philips Hue' }}
       />
       <Stack.Screen
+        name="news"
+        options={{ headerShown: true, title: 'Revue de presse' }}
+      />
+      <Stack.Screen
+        name="spotify"
+        options={{ headerShown: true, title: 'Spotify' }}
+      />
+      <Stack.Screen
+        name="spotify-devices"
+        options={{ headerShown: true, title: 'Appareils Spotify' }}
+      />
+      <Stack.Screen
         name="connect"
         options={{ headerShown: true, title: 'Connexion' }}
       />
