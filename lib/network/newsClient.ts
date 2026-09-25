@@ -1,6 +1,8 @@
 import type {
   NewsAddResponse,
   NewsAddResult,
+  NewsCategoryResponse,
+  NewsCategoryResult,
   NewsFeed,
   NewsRemoveResponse,
   NewsRemoveResult,
@@ -70,7 +72,9 @@ const NEWS_ERROR_MESSAGES: Record<string, string> = {
 /**
  * Valide une entree de flux sans lui faire confiance. `null` si la forme ne
  * correspond pas au contrat (`name`/`url` textes non vides, `feedUrl`/
- * `lastScanned` texte ou null).
+ * `lastScanned` texte ou null, `category` texte ou null). `category` absente
+ * est lue comme `null` : champ additif, tolerance vis-a-vis d'une appliance
+ * anterieure.
  */
 function parseNewsFeed(value: unknown): NewsFeed | null {
   if (typeof value !== "object" || value === null) return null;
@@ -81,7 +85,8 @@ function parseNewsFeed(value: unknown): NewsFeed | null {
     typeof f.url !== "string" ||
     f.url.length === 0 ||
     (f.feedUrl !== null && typeof f.feedUrl !== "string") ||
-    (f.lastScanned !== null && typeof f.lastScanned !== "string")
+    (f.lastScanned !== null && typeof f.lastScanned !== "string") ||
+    (f.category !== undefined && f.category !== null && typeof f.category !== "string")
   ) {
     return null;
   }
@@ -90,6 +95,7 @@ function parseNewsFeed(value: unknown): NewsFeed | null {
     url: f.url,
     feedUrl: f.feedUrl as string | null,
     lastScanned: f.lastScanned as string | null,
+    category: (f.category as string | null | undefined) ?? null,
   };
 }
 
@@ -102,8 +108,9 @@ function isNonNegativeInteger(value: unknown): value is number {
  * Valide le corps JSON de `GET /api/news/status` sans lui faire confiance.
  *
  * Champs inconnus ignores. `ok !== true`, `available` non booleen, `feeds`
- * non tableau (ou entree non conforme), ou `unreadCount` ni entier positif
- * ni null sont des erreurs de payload.
+ * non tableau (ou entree non conforme), `categories` non tableau de textes
+ * non vides, ou `unreadCount` ni entier positif ni null sont des erreurs de
+ * payload. `categories` absente est lue comme `[]` (champ additif).
  *
  * @param value corps, typiquement `await response.json()`.
  */
@@ -115,10 +122,17 @@ export function parseNewsStatus(value: unknown):
   }
   const r = value as Record<string, unknown>;
   const unreadOk = r.unreadCount === null || isNonNegativeInteger(r.unreadCount);
+  const categoriesOk =
+    r.categories === undefined ||
+    (Array.isArray(r.categories) &&
+      r.categories.every(
+        (entry) => typeof entry === "string" && entry.length > 0
+      ));
   if (
     r.ok !== true ||
     typeof r.available !== "boolean" ||
     !Array.isArray(r.feeds) ||
+    !categoriesOk ||
     !unreadOk
   ) {
     return { ok: false, error: "Statut de la revue de presse invalide." };
@@ -137,6 +151,7 @@ export function parseNewsStatus(value: unknown):
       ok: true,
       available: r.available,
       feeds,
+      categories: (r.categories as string[] | undefined) ?? [],
       unreadCount: r.unreadCount as number | null,
     },
   };
@@ -163,6 +178,34 @@ export function parseNewsAdd(value: unknown):
     return { ok: false, error: "Réponse d'ajout de flux invalide." };
   }
   return { ok: true, add: { ok: true, feed } };
+}
+
+/**
+ * Valide le corps JSON de `POST /api/news/feeds/category` en succes :
+ * `ok !== true`, `name` texte vide, ou `category` ni texte ni null sont des
+ * erreurs de payload.
+ *
+ * @param value corps, typiquement `await response.json()`.
+ */
+export function parseNewsCategory(value: unknown):
+  | { ok: true; category: NewsCategoryResponse }
+  | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, error: "Réponse revue de presse non JSON ou vide." };
+  }
+  const r = value as Record<string, unknown>;
+  if (
+    r.ok !== true ||
+    typeof r.name !== "string" ||
+    r.name.length === 0 ||
+    (r.category !== null && typeof r.category !== "string")
+  ) {
+    return { ok: false, error: "Réponse de rubrique invalide." };
+  }
+  return {
+    ok: true,
+    category: { ok: true, name: r.name, category: r.category as string | null },
+  };
 }
 
 /**
@@ -319,25 +362,29 @@ export async function fetchNewsStatus(
 
 /**
  * Ajoute un flux suivi : `POST /api/news/feeds`. `feedUrl` est optionnel
- * (sans lui, le flux est decouvert a la premiere analyse).
+ * (sans lui, le flux est decouvert a la premiere analyse) ; `category` est
+ * optionnelle et n'est transmise que non vide apres trim (sans elle, le flux
+ * n'a pas de rubrique).
  *
  * @param host IPv4 de l'appliance.
  * @param port port HTTP de l'appliance.
- * @param feed `name` + `url` (et `feedUrl` optionnel).
+ * @param feed `name` + `url` (et `feedUrl`/`category` optionnels).
  * @param timeoutMs delai max avant timeout (4000 ms par defaut).
  */
 export async function addNewsFeed(
   host: string,
   port: number,
-  feed: { name: string; url: string; feedUrl?: string },
+  feed: { name: string; url: string; feedUrl?: string; category?: string },
   timeoutMs: number = NEWS_TIMEOUT_MS
 ): Promise<NewsAddResult> {
   const coordinates = validateHostPort(host, port);
   if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
 
   const feedUrl = feed.feedUrl?.trim();
+  const category = feed.category?.trim();
   const body: Record<string, string> = { name: feed.name, url: feed.url };
   if (feedUrl !== undefined && feedUrl.length > 0) body.feedUrl = feedUrl;
+  if (category !== undefined && category.length > 0) body.category = category;
 
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
@@ -409,6 +456,64 @@ export async function removeNewsFeed(
       error: describeNewsError(
         body,
         `HTTP ${response.status} pendant la suppression du flux.`
+      ),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: redactText(describeNetworkFailure(error, timeoutMs)),
+    };
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/**
+ * Range un flux suivi dans une rubrique (une seule par flux), ou la retire :
+ * `POST /api/news/feeds/category`. `category` vide (`null` ou `""` apres trim)
+ * retire la rubrique du flux.
+ *
+ * @param host IPv4 de l'appliance.
+ * @param port port HTTP de l'appliance.
+ * @param name nom du flux suivi.
+ * @param category nouvelle rubrique, ou `null`/vide pour la retirer.
+ * @param timeoutMs delai max avant timeout (4000 ms par defaut).
+ */
+export async function setNewsCategory(
+  host: string,
+  port: number,
+  name: string,
+  category: string | null,
+  timeoutMs: number = NEWS_TIMEOUT_MS
+): Promise<NewsCategoryResult> {
+  const coordinates = validateHostPort(host, port);
+  if (!coordinates.ok) return { ok: false, error: coordinates.errors.join(" ") };
+
+  const trimmed = category?.trim() ?? "";
+  const payload = { name, category: trimmed.length > 0 ? trimmed : null };
+
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${buildDesktopUrl(host, port)}/api/news/feeds/category`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    const body: unknown = await response.json().catch(() => null);
+    if (response.ok) {
+      const parsed = parseNewsCategory(body);
+      return parsed.ok ? parsed.category : { ok: false, error: parsed.error };
+    }
+    return {
+      ok: false,
+      error: describeNewsError(
+        body,
+        `HTTP ${response.status} pendant la mise à jour de la rubrique.`
       ),
     };
   } catch (error) {

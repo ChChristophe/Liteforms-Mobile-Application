@@ -3,12 +3,14 @@ import {
   addNewsFeed,
   fetchNewsStatus,
   parseNewsAdd,
+  parseNewsCategory,
   parseNewsRemove,
   parseNewsScan,
   parseNewsSetup,
   parseNewsStatus,
   removeNewsFeed,
   scanNews,
+  setNewsCategory,
   setupNews,
 } from "./newsClient";
 
@@ -35,6 +37,7 @@ const FEED = {
   url: "https://xkcd.com",
   feedUrl: null,
   lastScanned: null,
+  category: null,
 };
 
 /** Entree d'ajout (le contrat de `addNewsFeed` n'accepte pas `null`). */
@@ -51,8 +54,10 @@ describe("parseNewsStatus", () => {
           url: "https://xkcd.com",
           feedUrl: "https://xkcd.com/rss.xml",
           lastScanned: "2026-09-24T09:12:00.000Z",
+          category: "Tech",
         },
       ],
+      categories: ["Tech"],
       unreadCount: 3,
       unknownField: "ignored",
     });
@@ -67,11 +72,48 @@ describe("parseNewsStatus", () => {
             url: "https://xkcd.com",
             feedUrl: "https://xkcd.com/rss.xml",
             lastScanned: "2026-09-24T09:12:00.000Z",
+            category: "Tech",
           },
         ],
+        categories: ["Tech"],
         unreadCount: 3,
       });
     }
+  });
+
+  it("lit `category` absente comme null et `categories` absentes comme []", () => {
+    const result = parseNewsStatus({
+      ok: true,
+      available: true,
+      feeds: [FEED],
+      unreadCount: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.status.feeds[0]?.category).toBeNull();
+      expect(result.status.categories).toEqual([]);
+    }
+  });
+
+  it("refuse des `categories` mal typées", () => {
+    expect(
+      parseNewsStatus({
+        ok: true,
+        available: true,
+        feeds: [],
+        categories: ["Tech", 42],
+        unreadCount: null,
+      }).ok
+    ).toBe(false);
+    expect(
+      parseNewsStatus({
+        ok: true,
+        available: true,
+        feeds: [],
+        categories: "Tech",
+        unreadCount: null,
+      }).ok
+    ).toBe(false);
   });
 
   it("parse un statut indisponible (feeds vides, unreadCount null)", () => {
@@ -291,6 +333,39 @@ describe("addNewsFeed", () => {
     });
   });
 
+  it("transmet category trimmée quand fournie, l'omet quand vide", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, feed: FEED }, 200);
+    await addNewsFeed("192.168.1.42", 43178, {
+      name: "xkcd",
+      url: "https://xkcd.com",
+      category: "  Tech  ",
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(JSON.parse(init.body)).toEqual({
+      name: "xkcd",
+      url: "https://xkcd.com",
+      category: "Tech",
+    });
+
+    const secondFetch = mockFetchOnce({ ok: true, feed: FEED }, 200);
+    await addNewsFeed("192.168.1.42", 43178, {
+      name: "xkcd",
+      url: "https://xkcd.com",
+      category: "   ",
+    });
+    const [, secondInit] = secondFetch.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(JSON.parse(secondInit.body)).toEqual({
+      name: "xkcd",
+      url: "https://xkcd.com",
+    });
+  });
+
   it("traduit DUPLICATE et INVALID_FIELD", async () => {
     mockFetchOnce({ ok: false, code: "DUPLICATE" }, 409);
     expect(await addNewsFeed("192.168.1.42", 43178, ADD_INPUT)).toEqual({
@@ -334,6 +409,100 @@ describe("addNewsFeed", () => {
     expect(await addNewsFeed("192.168.1.42", 43178, ADD_INPUT)).toEqual({
       ok: false,
       error: "Réponse d'ajout de flux invalide.",
+    });
+  });
+});
+
+describe("parseNewsCategory", () => {
+  it("parse une mise à jour conforme (rubrique posée ou retirée)", () => {
+    const set = parseNewsCategory({ ok: true, name: "xkcd", category: "Tech" });
+    expect(set.ok).toBe(true);
+    if (set.ok) {
+      expect(set.category).toEqual({ ok: true, name: "xkcd", category: "Tech" });
+    }
+    const cleared = parseNewsCategory({ ok: true, name: "xkcd", category: null });
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) expect(cleared.category.category).toBeNull();
+  });
+
+  it("refuse ok=false, name vide et category mal typée", () => {
+    expect(parseNewsCategory({ ok: false }).ok).toBe(false);
+    expect(parseNewsCategory(null).ok).toBe(false);
+    expect(parseNewsCategory({ ok: true, name: "", category: null }).ok).toBe(false);
+    expect(parseNewsCategory({ ok: true, name: "xkcd", category: 42 }).ok).toBe(false);
+    expect(parseNewsCategory({ ok: true, name: "xkcd" }).ok).toBe(false);
+  });
+});
+
+describe("setNewsCategory", () => {
+  it("poste name + category trimmée sur /api/news/feeds/category", async () => {
+    const fetchMock = mockFetchOnce(
+      { ok: true, name: "xkcd", category: "Tech" },
+      200
+    );
+
+    const result = await setNewsCategory("192.168.1.42", 43178, "xkcd", "  Tech  ");
+
+    expect(result).toEqual({ ok: true, name: "xkcd", category: "Tech" });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(url).toBe("http://192.168.1.42:43178/api/news/feeds/category");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ name: "xkcd", category: "Tech" });
+  });
+
+  it("envoie category null pour retirer la rubrique (vide ou null)", async () => {
+    const emptyFetch = mockFetchOnce({ ok: true, name: "xkcd", category: null });
+    await setNewsCategory("192.168.1.42", 43178, "xkcd", "");
+    const [, emptyInit] = emptyFetch.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(JSON.parse(emptyInit.body)).toEqual({ name: "xkcd", category: null });
+
+    const nullFetch = mockFetchOnce({ ok: true, name: "xkcd", category: null });
+    await setNewsCategory("192.168.1.42", 43178, "xkcd", null);
+    const [, nullInit] = nullFetch.mock.calls[0] as unknown as [
+      string,
+      RequestInit & { body: string },
+    ];
+    expect(JSON.parse(nullInit.body)).toEqual({ name: "xkcd", category: null });
+  });
+
+  it("traduit INVALID_FIELD (400) et NOT_FOUND (404)", async () => {
+    mockFetchOnce({ ok: false, code: "INVALID_FIELD" }, 400);
+    expect(await setNewsCategory("192.168.1.42", 43178, "xkcd", "Tech")).toEqual({
+      ok: false,
+      error: "Champ invalide : vérifie le nom et l'adresse du flux.",
+    });
+    mockFetchOnce({ ok: false, code: "NOT_FOUND" }, 404);
+    expect(await setNewsCategory("192.168.1.42", 43178, "xkcd", "Tech")).toEqual({
+      ok: false,
+      error: "Ce flux n'est plus suivi par l'appliance.",
+    });
+  });
+
+  it("traduit les 502 blogwatcher", async () => {
+    mockFetchOnce({ ok: false, code: "BLOGWATCHER_MISSING" }, 502);
+    expect(await setNewsCategory("192.168.1.42", 43178, "xkcd", "Tech")).toEqual({
+      ok: false,
+      error:
+        "L'appliance n'a pas la commande blogwatcher installée (image à mettre à jour).",
+    });
+    mockFetchOnce({ ok: false, code: "BLOGWATCHER_OUTPUT_UNREADABLE" }, 502);
+    expect(await setNewsCategory("192.168.1.42", 43178, "xkcd", "Tech")).toEqual({
+      ok: false,
+      error: "L'appliance n'a pas pu lire la réponse de blogwatcher.",
+    });
+  });
+
+  it("retourne une erreur sur réponse 200 invalide", async () => {
+    mockFetchOnce({ ok: true, name: "xkcd", category: 42 }, 200);
+    expect(await setNewsCategory("192.168.1.42", 43178, "xkcd", "Tech")).toEqual({
+      ok: false,
+      error: "Réponse de rubrique invalide.",
     });
   });
 });

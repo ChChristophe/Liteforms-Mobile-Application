@@ -263,6 +263,11 @@ export type NewsFeed = {
   feedUrl: string | null;
   /** Derniere analyse ISO 8601, ou `null` si jamais analyse. */
   lastScanned: string | null;
+  /**
+   * Rubrique du flux (une seule par flux), ou `null` si aucune. Vit cote
+   * appliance (`news-rubrics.json`) ; le Mobile ne fait que la piloter.
+   */
+  category: string | null;
 };
 
 /**
@@ -277,6 +282,11 @@ export type NewsStatusResponse = {
   available: boolean;
   /** Flux suivis, tries par nom. */
   feeds: NewsFeed[];
+  /**
+   * Rubriques distinctes non vides, triees (protocole 24/09/2026) ; `[]` si
+   * aucune. Sert de suggestions a la saisie cote Mobile.
+   */
+  categories: string[];
   /** Nombre d'articles non lus, ou `null` si indisponible. */
   unreadCount: number | null;
 };
@@ -294,6 +304,22 @@ export type NewsAddResponse = {
 
 /** Resultat de `addNewsFeed`, exploitable par l'UI. */
 export type NewsAddResult = NewsAddResponse | { ok: false; error: string };
+
+/**
+ * Reponse de `POST /api/news/feeds/category` (protocole 24/09/2026) : rubrique
+ * du flux mise a jour. `category` vaut `null` quand la rubrique est retiree.
+ */
+export type NewsCategoryResponse = {
+  /** `true` : mise a jour acceptee par l'appliance. */
+  ok: true;
+  /** Nom du flux concerne. */
+  name: string;
+  /** Nouvelle rubrique du flux, ou `null` si retiree. */
+  category: string | null;
+};
+
+/** Resultat de `setNewsCategory`, exploitable par l'UI. */
+export type NewsCategoryResult = NewsCategoryResponse | { ok: false; error: string };
 
 /** Reponse de `POST /api/news/feeds/remove` : flux (et articles) supprime. */
 export type NewsRemoveResponse = {

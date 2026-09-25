@@ -15,6 +15,7 @@ import {
   fetchNewsStatus,
   removeNewsFeed,
   scanNews,
+  setNewsCategory,
   setupNews,
 } from '../../lib/network/newsClient';
 import { useConnectionStore } from '../../stores/connectionStore';
@@ -59,8 +60,18 @@ export default function NewsScreen() {
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [category, setCategory] = useState('');
+  const [categoryEdits, setCategoryEdits] = useState<Record<string, string>>({});
+  const [savingCategory, setSavingCategory] = useState<string | null>(null);
 
-  const busy = loading || adding || removingName !== null || scanning || installing;
+  const busy =
+    loading ||
+    adding ||
+    removingName !== null ||
+    savingCategory !== null ||
+    scanning ||
+    installing;
+  const knownCategories = status?.categories ?? [];
 
   /** Relit le statut de la revue de presse (no-op si non connecte). */
   const refresh = useCallback(async () => {
@@ -97,19 +108,57 @@ export default function NewsScreen() {
     setError(null);
     setScanMessage(null);
     try {
+      const trimmedCategory = category.trim();
       const result = await addNewsFeed(host, port, {
         name: trimmedName,
         url: trimmedUrl,
+        ...(trimmedCategory.length > 0 ? { category: trimmedCategory } : {}),
       });
       if (result.ok) {
         setName('');
         setUrl('');
+        setCategory('');
         await refresh();
       } else {
         setError(result.error);
       }
     } finally {
       setAdding(false);
+    }
+  }
+
+  /**
+   * Change (ou retire) la rubrique d'un flux suivi. Sans edition du champ, la
+   * rubrique courante du flux est conservee (`currentCategory`) ; un champ
+   * vide (edite) enregistre `null`, ce qui retire la rubrique cote appliance.
+   */
+  async function onSetCategory(
+    feedName: string,
+    currentCategory: string | null
+  ): Promise<void> {
+    if (host === null || port === null) return;
+    const next = (categoryEdits[feedName] ?? currentCategory ?? '').trim();
+    setSavingCategory(feedName);
+    setError(null);
+    setScanMessage(null);
+    try {
+      const result = await setNewsCategory(host, port, feedName, next);
+      if (result.ok) {
+        setCategoryEdits((edits) => {
+          const { [feedName]: _removed, ...rest } = edits;
+          return rest;
+        });
+        setScanMessage(
+          result.category === null
+            ? `Rubrique retirée de ${feedName}.`
+            : `${feedName} rangé dans « ${result.category} ».`
+        );
+        await refresh();
+      } else {
+        setError(result.error);
+      }
+    } finally {
+      setSavingCategory(null);
     }
   }
 
@@ -241,28 +290,61 @@ export default function NewsScreen() {
                     </Text>
                   ) : (
                     status.feeds.map((feed) => (
-                      <View key={feed.name} style={styles.feedRow}>
-                        <View style={styles.feedText}>
-                          <Text style={styles.feedName}>{feed.name}</Text>
-                          <Text style={styles.statusText}>{feed.url}</Text>
-                          {feed.feedUrl !== null && (
-                            <Text style={styles.statusText}>{feed.feedUrl}</Text>
-                          )}
-                          <Text style={styles.feedMeta}>
-                            {feed.lastScanned === null
-                              ? 'Jamais analysé'
-                              : `Analysé le ${formatLastScanned(feed.lastScanned)}`}
-                          </Text>
+                      <View key={feed.name} style={styles.feedBlock}>
+                        <View style={styles.feedRow}>
+                          <View style={styles.feedText}>
+                            <Text style={styles.feedName}>{feed.name}</Text>
+                            <Text style={styles.statusText}>{feed.url}</Text>
+                            {feed.feedUrl !== null && (
+                              <Text style={styles.statusText}>{feed.feedUrl}</Text>
+                            )}
+                            <Text style={styles.feedMeta}>
+                              {feed.lastScanned === null
+                                ? 'Jamais analysé'
+                                : `Analysé le ${formatLastScanned(feed.lastScanned)}`}
+                            </Text>
+                          </View>
+                          <Pressable
+                            style={[styles.removeButton, busy && styles.buttonDisabled]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Retirer ${feed.name}`}
+                            disabled={busy}
+                            onPress={() => void onRemove(feed.name)}
+                          >
+                            <Text style={styles.removeButtonText}>
+                              {removingName === feed.name ? 'Retrait…' : 'Retirer'}
+                            </Text>
+                          </Pressable>
                         </View>
+                        <Text style={styles.feedMeta}>
+                          {feed.category === null
+                            ? 'Sans rubrique'
+                            : `Rubrique : ${feed.category}`}
+                        </Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Rubrique (vide = aucune)"
+                          value={categoryEdits[feed.name] ?? feed.category ?? ''}
+                          editable={!busy}
+                          onChangeText={(text) =>
+                            setCategoryEdits((edits) => ({
+                              ...edits,
+                              [feed.name]: text,
+                            }))
+                          }
+                          accessibilityLabel={`Rubrique de ${feed.name}`}
+                        />
                         <Pressable
-                          style={[styles.removeButton, busy && styles.buttonDisabled]}
+                          style={[styles.saveButton, busy && styles.buttonDisabled]}
                           accessibilityRole="button"
-                          accessibilityLabel={`Retirer ${feed.name}`}
+                          accessibilityLabel={`Enregistrer la rubrique de ${feed.name}`}
                           disabled={busy}
-                          onPress={() => void onRemove(feed.name)}
+                          onPress={() => void onSetCategory(feed.name, feed.category)}
                         >
-                          <Text style={styles.removeButtonText}>
-                            {removingName === feed.name ? 'Retrait…' : 'Retirer'}
+                          <Text style={styles.saveButtonText}>
+                            {savingCategory === feed.name
+                              ? 'Enregistrement…'
+                              : 'Enregistrer la rubrique'}
                           </Text>
                         </Pressable>
                       </View>
@@ -294,6 +376,41 @@ export default function NewsScreen() {
                 keyboardType="url"
                 accessibilityLabel="Adresse du flux"
               />
+              <TextInput
+                style={styles.input}
+                placeholder="Rubrique (facultatif)"
+                value={category}
+                editable={!busy}
+                onChangeText={setCategory}
+                accessibilityLabel="Rubrique du flux"
+              />
+              {knownCategories.length > 0 && (
+                <View style={styles.chipsRow}>
+                  {knownCategories.map((known) => {
+                    const active = category.trim() === known;
+                    return (
+                      <Pressable
+                        key={known}
+                        style={[
+                          styles.chip,
+                          active && styles.chipActive,
+                          busy && styles.buttonDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Choisir la rubrique ${known}`}
+                        disabled={busy}
+                        onPress={() => setCategory(known)}
+                      >
+                        <Text
+                          style={[styles.chipText, active && styles.chipTextActive]}
+                        >
+                          {known}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
               <Pressable
                 style={[styles.button, busy && styles.buttonDisabled]}
                 accessibilityRole="button"
@@ -387,9 +504,31 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     marginTop: 8,
   },
+  feedBlock: { gap: 8 },
   feedText: { flex: 1, gap: 2 },
   feedName: { fontSize: 14, fontWeight: '600', color: '#111827' },
   feedMeta: { fontSize: 12, color: '#9ca3af' },
+  saveButton: {
+    minHeight: 40,
+    borderRadius: 10,
+    backgroundColor: '#4a90d9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 14 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    minHeight: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#4a90d9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipActive: { backgroundColor: '#dbeafe' },
+  chipText: { color: '#2563eb', fontSize: 13 },
+  chipTextActive: { fontWeight: '600' },
   removeButton: {
     minHeight: 36,
     paddingHorizontal: 12,
